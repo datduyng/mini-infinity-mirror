@@ -1,0 +1,64 @@
+<!DOCTYPE HTML><html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html {
+     font-family: Arial;
+     display: inline-block;
+     margin: 0px auto;
+    }
+    .para-spacing {
+    	margin-left: 20px;
+    }
+    input[type='radio'] { transform: scale(2); margin-right: 10px }
+  </style>
+</head>
+<body>
+	<div style="margin: auto; width: 375px;">
+		<h2 style="text-align: center;">Mini infinity mirror control</h2>
+
+		<h4>General setting</h4>
+		<div class="para-spacing">
+			<label for="intensity">Intensity:</label>
+			<input type="number" id="intensity" name="intensity" min="10" max="100" placeholder="10 - 100" style="width: 80px;">
+		</div>
+
+
+
+		<h4>Mode setting</h4>
+		<div class="para-spacing">
+		  <label for="head">Color: (only apply for 4 options below)</label>
+	    <input type="color" value="#e66465">
+		  <div class="para-spacing">
+			  <input type="radio" id="male" name="gender" value="nightmode">
+			  <label for="male">Night mode</label><br><br>
+			  <input type="radio" id="female" name="gender" value="hopefulmode">
+			  <label for="female">Hopeful</label><br><br>
+			  <input type="radio" id="other" name="gender" value="lightshow01">
+			  <label for="other">Light show 1</label><br><br>
+			  <input type="radio" id="other" name="gender" value="lightshow02">
+			  <label for="other">Light show 2</label><br><br>
+		  </div>
+		  <input type="radio" id="other" name="gender" value="rainbowshow">
+		  <label for="other">Rainbow show</label>
+		</div>
+	  <br>
+	  <br>
+	  <button onclick="save_config()">Save</button>
+	</div>
+	<script>
+		function save_config() {
+			fetch("/save", {
+		    method: 'POST',
+		    headers: {
+		      'Content-Type': 'application/x-www-form-urlencoded',
+		    }, 
+		    body: new URLSearchParams({
+		        intensity: 90,
+		        _model: 1
+		    })
+		  });
+		}
+	</script>
+</body>
+</html>
