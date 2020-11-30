@@ -1,14 +1,14 @@
 /*
- * 
- */
+
+*/
 String SOFTWARE_VERSION = "1.0.0";
 
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include <Adafruit_NeoPixel.h>
 
-SoftwareSerial mySerial(11, 12); // RX, TX
-#define OWNERSHIP_WRITE_CHECK 123 
+SoftwareSerial mySerial(2,3); // RX, TX
+#define OWNERSHIP_WRITE_CHECK 123
 #define DEVICE_CONFIG_EEPROM_PACKET_ADDRESS 0
 
 #define STABLE_LIGHT_MODE 0
@@ -30,7 +30,7 @@ typedef struct {
   byte red;
   byte green;
   byte blue;
-  int  writeCycleCount; 
+  int  writeCycleCount;
 } device_config;
 
 device_config defaultDeviceConfig = {
@@ -60,29 +60,31 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXEL, NEO_PIXEL_PIN, NEO_GRB + 
 
 
 String deviceConfigDebugString(device_config _deviceConfig) {
-  return "{ ownership=" + String(_deviceConfig.ownership) + ", " + 
-            "intensity=" + String(_deviceConfig.intensity) + ", " + 
-            "_mode=" + String(_deviceConfig._mode) + ", " +
-            "red=" + String(_deviceConfig.red) + ", " + 
-            "green=" + String(_deviceConfig.green) + ", " + 
-            "blue=" + String(_deviceConfig.blue) + ", " + 
-            "writeCycleCount=" + String(_deviceConfig.writeCycleCount) + "}"; 
-            
+  return "{ ownership=" + String(_deviceConfig.ownership) + ", " +
+         "intensity=" + String(_deviceConfig.intensity) + ", " +
+         "_mode=" + String(_deviceConfig._mode) + ", " +
+         "red=" + String(_deviceConfig.red) + ", " +
+         "green=" + String(_deviceConfig.green) + ", " +
+         "blue=" + String(_deviceConfig.blue) + ", " +
+         "writeCycleCount=" + String(_deviceConfig.writeCycleCount) + "}";
+
 }
 
 String deviceConfigToPacketString(device_config _deviceConfig) {
-    return "SAVE-I:"+String(_deviceConfig.intensity)+
-            ";M:"+String(_deviceConfig._mode)+
-            ";C:"+String(_deviceConfig.red)+","+String(_deviceConfig.green)+","+String(_deviceConfig.blue) +
-            ";W:"+String(_deviceConfig.writeCycleCount);
+  return "DATA-I:" + String(_deviceConfig.intensity) +
+         ";M:" + String(_deviceConfig._mode) +
+         ";C:" + String(_deviceConfig.red) + "," + String(_deviceConfig.green) + "," + String(_deviceConfig.blue) +
+         ";W:" + String(_deviceConfig.writeCycleCount);
 }
 
 void setup() {
+
   Serial.println("Initializing mini infinity mirror software (Version: " + SOFTWARE_VERSION + ")");
   // put your setup code here, to run once:
   Serial.begin(9600);
   mySerial.begin(9600);
 
+  mySerial.println("Starting Arduino");
   Serial.println("Pulling device config from EEPROM....");
   device_config eepromDeviceConfig;
   EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, eepromDeviceConfig);
@@ -96,12 +98,60 @@ void setup() {
 
   Serial.println("Configuring strip...");
   strip.begin();
-  strip.setBrightness(deviceConfig.intensity*2);
+  strip.setBrightness(deviceConfig.intensity * 2);
   strip.show();
-  
+
   Serial.println("Done intializing.");
 }
 
+
+
+
+
+void loop() {
+  ESPUartListener();
+  switch (deviceConfig._mode) {
+    case STABLE_LIGHT_MODE:
+      for (uint16_t i = 0; i < strip.numPixels(); i++) {
+        strip.setPixelColor(i, getUserConfiguredStripColor());
+        strip.show();
+      }
+      delay(700); // needed else, SoftwareSerial will receive gibberish
+      break;
+
+    case LIGHT_SPIN_LIGHT_MODE:
+      lightSpin(getUserConfiguredStripColor(), 5, 10000, 40);
+      break;
+
+    case NIGHT_MODE_LIGHT_MODE:
+      nightMode(getUserConfiguredStripColor(), 80, deviceConfig.intensity);
+      break;
+
+    case GLOW_AND_BLOW_LIGHT_MODE:
+      break;
+
+    case RGB_WIPE_LIGHT_MODE:
+      break;
+
+    case RAINBOW_CYCLE_LIGHT_MODE:
+      break;
+
+    case SMOOTH_RAINBOW_TRANSITION_LIGHT_MODE:
+      break;
+
+    case THEATHER_CHASE_RAINBOW_LIGHT_MODE:
+      break;
+
+    case LIGHT_SHOW_LIGHT_MODE01:
+      break;
+
+    case LIGHT_SHOW_LIGHT_MODE02:
+      break;
+
+    default:
+      break;
+  }
+}
 
 
 void ESPUartListener() {
@@ -114,7 +164,7 @@ void ESPUartListener() {
   }
 
   if (stringReady) {
-    Serial.println("From ESP: "+incommingStr);
+    Serial.println("From ESP: " + incommingStr);
     String cmd = getStrPart(incommingStr, '-', 0);
     Serial.println("From ESP COMMAND:" + cmd);
     if (cmd.equals("SAVE")) {
@@ -128,7 +178,7 @@ void ESPUartListener() {
       byte blueVal = getStrPart(rgbColorStr, ',', 2).toInt();
       device_config eepromDeviceConfig;
       EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, eepromDeviceConfig);
-      
+
       device_config deviceConfigSavePayload = {
         OWNERSHIP_WRITE_CHECK,
         intensity,
@@ -145,74 +195,30 @@ void ESPUartListener() {
       device_config secondEepromDeviceConfig;
       EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, secondEepromDeviceConfig);
       //double check data here
-      if (secondEepromDeviceConfig.ownership != OWNERSHIP_WRITE_CHECK || 
+      if (secondEepromDeviceConfig.ownership != OWNERSHIP_WRITE_CHECK ||
           secondEepromDeviceConfig.intensity != intensity ||
           secondEepromDeviceConfig._mode != _mode ||
           secondEepromDeviceConfig.red != redVal ||
           secondEepromDeviceConfig.green != greenVal ||
           secondEepromDeviceConfig.blue != blueVal) {
-            Serial.println("Problem with saving the device config packet");
-            mySerial.println("EEROR-PROBLEM SAVING the device config packet");
+        Serial.println("Problem with saving the device config packet");
+        mySerial.println("EEROR-PROBLEM SAVING the device config packet");
       } else {
         mySerial.println("OK-");
       }
-//      delay(10000);
-      Serial.println("reset");
+      //      delay(10000);
+      Serial.println("Reseting with new config");
+      delay(200);//unsure why this delay is needed. resetFunc won't work correctly without
       resetFunc();
-    } else if (cmd.equals("GET_CONFIG-")) {
+    } else if (cmd.equals("GET_CONFIG")) {
       device_config eepromDeviceConfig;
       EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, eepromDeviceConfig);
-      mySerial.println("DATA-"+deviceConfigToPacketString(eepromDeviceConfig));
-      Serial.println("DATA-I:100;M:0;C:123,24,12");
+      mySerial.println(deviceConfigToPacketString(eepromDeviceConfig));
+      Serial.println(deviceConfigToPacketString(eepromDeviceConfig));
     } else {
-      mySerial.println("INVALID_COMMAND-"+incommingStr);
-      Serial.println("SEND: INVALID_COMMAND-"+String(incommingStr));
+      mySerial.println("INVALID_COMMAND-" + incommingStr);
+      Serial.println("SEND: INVALID_COMMAND-" + String(incommingStr));
     }
-  }
-}
-
-void loop() {
-  ESPUartListener();
-  switch (deviceConfig._mode) {
-    case STABLE_LIGHT_MODE:
-    #define GROUP_
-      for (uint16_t i=0; i<strip.numPixels(); i++) {
-        strip.setPixelColor(i, getUserConfiguredStripColor());
-        strip.show();
-      }
-      break;
-
-    case LIGHT_SPIN_LIGHT_MODE:
-      lightSpin(getUserConfiguredStripColor(), 5, 10000, 40);   
-      break;
-
-    case NIGHT_MODE_LIGHT_MODE:
-      nightMode(getUserConfiguredStripColor(), 80, deviceConfig.intensity); 
-      break;
-      
-    case GLOW_AND_BLOW_LIGHT_MODE:  
-      break;
-
-    case RGB_WIPE_LIGHT_MODE:    
-      break;
-
-    case RAINBOW_CYCLE_LIGHT_MODE:    
-      break;
-
-    case SMOOTH_RAINBOW_TRANSITION_LIGHT_MODE:    
-      break;
-
-    case THEATHER_CHASE_RAINBOW_LIGHT_MODE:    
-      break;
-
-    case LIGHT_SHOW_LIGHT_MODE01:    
-      break;
-
-    case LIGHT_SHOW_LIGHT_MODE02:    
-      break;
-      
-    default:
-      break;
   }
 }
 
@@ -227,14 +233,14 @@ void lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
     Serial.println("ERROR: lightSpin() group need to be less than numPixels");
     return;
   }
-  for (uint16_t i=0; i<group; i++) {
+  for (uint16_t i = 0; i < group; i++) {
     strip.setPixelColor(i, color);
     strip.show();
   }
 
-  for (int i=group; i<numSteps; i++) {
-    strip.setPixelColor(i%strip.numPixels(), color);
-    strip.setPixelColor((i-group)%strip.numPixels(), strip.Color(0, 0, 0));
+  for (int i = group; i < numSteps; i++) {
+    strip.setPixelColor(i % strip.numPixels(), color);
+    strip.setPixelColor((i - group) % strip.numPixels(), strip.Color(0, 0, 0));
     strip.show();
     delay(wait);
     ESPUartListener();
@@ -242,9 +248,9 @@ void lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
 }
 
 void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
-  for (int i=0; i<=top; i++) {
+  for (int i = 0; i <= top; i++) {
     strip.setBrightness(i);
-    for(uint16_t j=0; j<strip.numPixels(); j++) {
+    for (uint16_t j = 0; j < strip.numPixels(); j++) {
       strip.setPixelColor(j, color);
     }
     strip.show();
@@ -257,9 +263,9 @@ void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
 
   delay(1400);
   ESPUartListener();
-  for (int i=top; i>=0; i--) {
+  for (int i = top; i >= 0; i--) {
     strip.setBrightness(i);
-    for(uint16_t j=0; j<strip.numPixels(); j++) {
+    for (uint16_t j = 0; j < strip.numPixels(); j++) {
       strip.setPixelColor(j, color);
     }
     strip.show();
@@ -277,15 +283,15 @@ String getStrPart(String data, char separator, int index)
 {
   int found = 0;
   int strIndex[] = {0, -1};
-  int maxIndex = data.length()-1;
+  int maxIndex = data.length() - 1;
 
-  for(int i=0; i<=maxIndex && found<=index; i++){
-    if(data.charAt(i)==separator || i==maxIndex){
-        found++;
-        strIndex[0] = strIndex[1]+1;
-        strIndex[1] = (i == maxIndex) ? i+1 : i;
+  for (int i = 0; i <= maxIndex && found <= index; i++) {
+    if (data.charAt(i) == separator || i == maxIndex) {
+      found++;
+      strIndex[0] = strIndex[1] + 1;
+      strIndex[1] = (i == maxIndex) ? i + 1 : i;
     }
   }
 
-  return found>index ? data.substring(strIndex[0], strIndex[1]) : "";
+  return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
 }

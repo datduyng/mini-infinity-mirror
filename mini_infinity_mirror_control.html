@@ -1,64 +1,167 @@
-<!DOCTYPE HTML><html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    html {
-     font-family: Arial;
-     display: inline-block;
-     margin: 0px auto;
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html {
+        font-family: Arial;
+        display: inline-block;
+        margin: 0px auto;
+      }
+      .para-spacing {
+        margin-left: 20px;
+      }
+      input[type="radio"] {
+        transform: scale(2);
+        margin-right: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div style="margin: auto; width: 375px">
+      <h2 style="text-align: center">Mini infinity mirror control</h2>
+
+      <h4>General setting</h4>
+      <div class="para-spacing">
+        <label for="intensity">Intensity:     5</label>
+        <input type="range" min="5" max="120" id="intensity-slider" /> 
+        <label for="intensity">120</label>
+      </div>
+
+      <h4>Mode setting</h4>
+      <div class="para-spacing">
+        <label for="head">Color: (only apply for 4 options below)</label>
+        <input type="color" value="#e66465" id="color-picker"/>
+        <div class="para-spacing">
+          <br />
+          <input type="radio" id="lightmode-0" name="lightmode" value="0" />
+          <label for="male">Stable</label><br /><br />
+          <input type="radio" id="lightmode-1" name="lightmode" value="1" />
+          <label for="female">Light spin</label><br /><br />
+          <input type="radio" id="lightmode-2" name="lightmode" value="2" />
+          <label for="other">Night mode</label><br /><br />
+          <input type="radio" id="lightmode-3" name="lightmode" value="3" />
+          <label for="other">Glow and blow</label><br /><br />
+        </div>
+        <input type="radio" id="lightmode-100" name="lightmode" value="100" />
+        <label for="other">RGB swipe</label><br /><br />
+        <input type="radio" id="lightmode-101" name="lightmode" value="101" />
+        <label for="other">Rainbow cycle</label><br /><br />
+        <input type="radio" id="lightmode-102" name="lightmode" value="102" />
+        <label for="other">Smooth rainbow</label><br /><br />
+        <input type="radio" id="lightmode-103" name="lightmode" value="103" />
+        <label for="other">Theater chase rainbow show</label><br /><br />
+        <input type="radio" id="lightmode-104" name="lightmode" value="104" />
+        <label for="other">Light show 01</label><br /><br />
+        <input type="radio" id="lightmode-105" name="lightmode" value="105" />
+        <label for="other">Light show 02</label><br /><br />
+      </div>
+      <br />
+      <br />
+      <button onclick="save_config()">Save</button>
+
+      <button onclick="populateDefault()">Reset</button>
+
+      <br />
+
+      <br />
+      <button onclick="populateDebugMessage()">vvv Generate debug message for nerd vvvv</button>
+      <div id="debug-area">
+
+      </div>
+    </div>
+    <script>
+      // let userConfig = {
+      //     intensity: %INTENSITY%,
+      //     _mode: %_MODE%,
+      //     red: %RED%,
+      //     blue: %BLUE%,
+      //     green: %GREEN%,
+      // };
+
+      // let debug = {
+      //   eepromWriteCycleCount: %EEPROM_WRITE_CYCLE_COUNT%,
+      //   last_error: %MOST_RECENT_ERROR%,
+      //   num_connected_client_to_access_point: %NUM_CONNECTED_CLIENT_TO_AP%
+      // }
+    var userConfig = {
+      intensity: 100,
+      _mode: 2,
+      red: 0,
+      blue: 0,
+      green: 255,
+    };
+
+    // var debug = {
+    //   eepromWriteCycleCount: 100,
+    //   last_error: "Test",
+    //   num_connected_client_to_access_point: 1
+    // };
+    // var default_config = {
+    //     intensity: 50,
+    //     _mode: 102,
+    //     red: 0,
+    //     blue: 250,
+    //     green: 0,
+    // };
+    
+    function hexToRgb(hex) {
+      var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+      } : null;
     }
-    .para-spacing {
-    	margin-left: 20px;
+    function componentToHex(c) {
+      var hex = c.toString(16);
+      return hex.length == 1 ? "0" + hex : hex;
     }
-    input[type='radio'] { transform: scale(2); margin-right: 10px }
-  </style>
-</head>
-<body>
-	<div style="margin: auto; width: 375px;">
-		<h2 style="text-align: center;">Mini infinity mirror control</h2>
 
-		<h4>General setting</h4>
-		<div class="para-spacing">
-			<label for="intensity">Intensity:</label>
-			<input type="number" id="intensity" name="intensity" min="10" max="100" placeholder="10 - 100" style="width: 80px;">
-		</div>
+    function rgbToHex(r, g, b) {
+      return "#" + componentToHex(r) + componentToHex(g) + componentToHex(b);
+    }
 
+    function populateDefault() {
+      document.getElementById("lightmode-"+default_config._mode).checked = true;
+      document.getElementById("intensity-slider").value = default_config.intensity;
+      document.getElementById("color-picker").value = rgbToHex(default_config.red, default_config.green, default_config.blue);
+    }
 
+    function populateUserconfig() {
+      document.getElementById("lightmode-"+userConfig._mode).checked = true;
+      document.getElementById("intensity-slider").value = userConfig.intensity;
+      document.getElementById("color-picker").value = rgbToHex(userConfig.red, userConfig.green, userConfig.blue);
+    }
+    populateUserconfig();
 
-		<h4>Mode setting</h4>
-		<div class="para-spacing">
-		  <label for="head">Color: (only apply for 4 options below)</label>
-	    <input type="color" value="#e66465">
-		  <div class="para-spacing">
-			  <input type="radio" id="male" name="gender" value="nightmode">
-			  <label for="male">Night mode</label><br><br>
-			  <input type="radio" id="female" name="gender" value="hopefulmode">
-			  <label for="female">Hopeful</label><br><br>
-			  <input type="radio" id="other" name="gender" value="lightshow01">
-			  <label for="other">Light show 1</label><br><br>
-			  <input type="radio" id="other" name="gender" value="lightshow02">
-			  <label for="other">Light show 2</label><br><br>
-		  </div>
-		  <input type="radio" id="other" name="gender" value="rainbowshow">
-		  <label for="other">Rainbow show</label>
-		</div>
-	  <br>
-	  <br>
-	  <button onclick="save_config()">Save</button>
-	</div>
-	<script>
-		function save_config() {
-			fetch("/save", {
-		    method: 'POST',
-		    headers: {
-		      'Content-Type': 'application/x-www-form-urlencoded',
-		    }, 
-		    body: new URLSearchParams({
-		        intensity: 90,
-		        _model: 1
-		    })
-		  });
-		}
-	</script>
-</body>
+    function populateDebugMessage() {
+      document.getElementById("debug-area").innerHTML = 
+      `
+        <pre>
+User config: ${JSON.stringify(userConfig, undefined, 2)}
+Debug: ${JSON.stringify(debug, undefined, 2)}
+        </pre>
+      `
+    }
+
+    function save_config() {
+      let rgb = hexToRgb(document.getElementById("color-picker").value);
+
+      fetch("http://192.168.1.1/save", {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            intensity: parseInt(document.getElementById("intensity-slider").value),
+            _mode: document.querySelector('input[name="lightmode"]:checked').value,
+            red: rgb.r,
+            green: rgb.g,
+            blue: rgb.b 
+        })
+      });
+    }
+  </script>
+  </body>
 </html>
