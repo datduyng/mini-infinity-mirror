@@ -11,6 +11,22 @@ const char* password = "123456789";
 AsyncWebServer server(80);
 SoftwareSerial mySerial(5,4); // RX, TX
 
+IPAddress local_IP(1,2,3,4);
+IPAddress gateway(1,2,3,1);
+IPAddress subnet(255,255,255,0);
+
+typedef struct {
+  byte intensity;
+  byte _mode;
+  byte redColor;
+  byte greenColor;
+  byte blueColor;  
+} device_config;
+
+#define FLAG_DONE_SERIAL_WRITE_PIN 0
+
+
+
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
@@ -89,19 +105,6 @@ String tprocessor(const String& var){
   return String();
 }
 
-IPAddress local_IP(1,2,3,4);
-IPAddress gateway(1,2,3,1);
-IPAddress subnet(255,255,255,0);
-
-
-typedef struct {
-  int intensity;
-  int _mode;
-  int redColor;
-  int greenColor;
-  int blueColor;  
-} device_config;
-
 String getStrPart(String data, char separator, int index)
 {
   int found = 0;
@@ -120,17 +123,23 @@ String getStrPart(String data, char separator, int index)
 }
 
 unsigned long startSaveRequestTimer;
+
+String construct_config_packet(device_config deviceConfig) {
+    return "SAVE-I:"+String(deviceConfig.intensity)+
+            ",M:"+String(deviceConfig._mode)+
+            ",C:"+String(deviceConfig.redColor)+","+String(deviceConfig.greenColor)+","+String(deviceConfig.blueColor);
+}
 void setup() {
+  digitalWrite(FLAG_DONE_SERIAL_WRITE_PIN, HIGH);
   Serial.begin(9600);
   mySerial.begin(9600);
   Serial.print("Setting AP (Access Point)…");
-
-
-  WiFi.persistent( false ); 
+  pinMode(FLAG_DONE_SERIAL_WRITE_PIN, OUTPUT);
+  
+  WiFi.persistent(false); 
   Serial.print("Setting soft-AP configuration ... ");
   Serial.println(WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");
 
-  
   // Remove the password parameter, if you want the AP (Access Point) to be open
   WiFi.softAP(ssid, password);
 
@@ -209,7 +218,43 @@ void setup() {
   server.begin();
 }
 
+void handleAdminUartCmd() {
+  String incommingStr = "";
+  boolean stringReady = false;
+
+  while (Serial.available()) {
+    incommingStr = Serial.readStringUntil('\n');
+    stringReady = true;
+  }
+
+  if (stringReady) {
+
+    String adminPart = getStrPart(incommingStr, '-', 0);
+    if (adminPart.equals("ADMIN")) {
+      String cmd = getStrPart(incommingStr, '-', 1);
+      Serial.println("Executing command: " + incommingStr);
+      if (cmd.equals("SEND_NANO_TEST_CONFIG_PAYLOAD")) {
+        device_config deviceConfig = {
+          77,
+          1,
+          24,
+          123,
+          213
+        };
+        mySerial.println(construct_config_packet(deviceConfig));
+        Serial.println("Sent " + construct_config_packet(deviceConfig));
+      } else {
+        Serial.println("Invalid admin command: " + cmd);
+      }
+    } else {
+      Serial.println("Invalid command: " + incommingStr);
+    }
+  }
+}
+
 void loop() {
+  handleAdminUartCmd();
+  mySerial.println("Alive from ESP");
   Serial.println("Alive");
   delay(2000);
 }
