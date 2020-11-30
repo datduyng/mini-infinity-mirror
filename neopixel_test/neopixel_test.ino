@@ -53,10 +53,37 @@ void loop() {
 
 //  rainbow(20);
 //  rainbowCycle(40);
-  theaterChaseRainbow(50);
+//  theaterChaseRainbow(50);
 //  lightSpin(strip.Color(0, 255, 0), 5, 10000, 40);
+    nightMode(strip.Color(0, 255, 0), 80, 50);
 }
 
+void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
+  for (int i=0; i<=top; i++) {
+    strip.setBrightness(i);
+    for(uint16_t j=0; j<strip.numPixels(); j++) {
+      strip.setPixelColor(j, color);
+    }
+    strip.show();
+    if (i < 40) {
+      delay(wait);
+    }
+    delay(wait);
+  }
+
+  delay(1400);
+  for (int i=top; i>=0; i--) {
+    strip.setBrightness(i);
+    for(uint16_t j=0; j<strip.numPixels(); j++) {
+      strip.setPixelColor(j, color);
+    }
+    strip.show();
+    if (i < 40) {
+      delay(wait);
+    }
+    delay(wait);
+  }
+}
 
 void lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
   if (group >= strip.numPixels()) {

@@ -126,8 +126,8 @@ unsigned long startSaveRequestTimer;
 
 String construct_config_packet(device_config deviceConfig) {
     return "SAVE-I:"+String(deviceConfig.intensity)+
-            ",M:"+String(deviceConfig._mode)+
-            ",C:"+String(deviceConfig.redColor)+","+String(deviceConfig.greenColor)+","+String(deviceConfig.blueColor);
+            ";M:"+String(deviceConfig._mode)+
+            ";C:"+String(deviceConfig.redColor)+","+String(deviceConfig.greenColor)+","+String(deviceConfig.blueColor);
 }
 void setup() {
   digitalWrite(FLAG_DONE_SERIAL_WRITE_PIN, HIGH);
@@ -179,7 +179,7 @@ void setup() {
       }
     }
 
-    mySerial.println("SAVE-I:"+String(deviceConfig.intensity)+",M:"+String(deviceConfig._mode)+",C:"+String(deviceConfig.redColor)+","+String(deviceConfig.greenColor)+","+String(deviceConfig.blueColor));
+    mySerial.println(construct_config_packet(deviceConfig));
     startSaveRequestTimer = millis();
     Serial.println("Received a request");
     unsigned long currentTime = millis();
@@ -229,20 +229,26 @@ void handleAdminUartCmd() {
 
   if (stringReady) {
 
-    String adminPart = getStrPart(incommingStr, '-', 0);
+    String adminPart = getStrPart(incommingStr, '+', 0);
     if (adminPart.equals("ADMIN")) {
-      String cmd = getStrPart(incommingStr, '-', 1);
+      String cmd = getStrPart(incommingStr, '+', 1);
       Serial.println("Executing command: " + incommingStr);
       if (cmd.equals("SEND_NANO_TEST_CONFIG_PAYLOAD")) {
+        // ADMIN+SEND_NANO_TEST_CONFIG_PAYLOAD
         device_config deviceConfig = {
-          77,
+          88,
+          2,
           1,
-          24,
-          123,
-          213
+          2,
+          3
         };
         mySerial.println(construct_config_packet(deviceConfig));
         Serial.println("Sent " + construct_config_packet(deviceConfig));
+      } else if (cmd.equals("NANO")) {
+        // ADMIN+NANO+SAVE-I:33;M:1;C:4,2,3
+        String data = getStrPart(incommingStr, '+', 2);
+        mySerial.println(data);
+        Serial.println("Sent to Nano: " + data);
       } else {
         Serial.println("Invalid admin command: " + cmd);
       }
@@ -252,9 +258,22 @@ void handleAdminUartCmd() {
   }
 }
 
+void ArduinoUartListener() {
+  String incommingStr = "";
+  boolean stringReady = false;
+
+  while (mySerial.available()) {
+    incommingStr = mySerial.readString();
+    stringReady = true;
+  }
+
+  if (stringReady) { 
+    Serial.println("FROM Arduino: " + incommingStr);
+  }
+}
 void loop() {
   handleAdminUartCmd();
-  mySerial.println("Alive from ESP");
+  ArduinoUartListener();
   Serial.println("Alive");
   delay(2000);
 }
