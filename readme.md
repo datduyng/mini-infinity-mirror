@@ -5,8 +5,7 @@
 # Developer Notes
 ## Arduino Nano
 
-
-## Problem with uploading code to Arduino on Mac
+### Problem with uploading code to Arduino on Mac
 
 This section will apply to you if you get below error while trying to upload
 
@@ -26,7 +25,11 @@ avrdude: stk500_getsync() attempt 3 of 10: not in sync: resp=0x00
 
 
 ## NodeMCU
-nodemcu board version: 2.7.4
+- Nodemcu board version: 2.7.4
+- NodemCU ESP-12F board
+- Using SPIFFS with NodeMCU: https://randomnerdtutorials.com/install-esp8266-filesystem-uploader-arduino-ide/ (Idea is to create a small file system using Flash memory)
+
+
 
 ## Cad files
 - metrics: mm

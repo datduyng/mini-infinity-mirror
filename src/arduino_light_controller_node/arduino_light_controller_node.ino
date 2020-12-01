@@ -1,13 +1,14 @@
 /*
+ * 1.0.0 Initial
+ * 1.0.1 Add software serial
+ * 1.0.2 Add light mode and software serial cmd handling
+ */
+String SOFTWARE_VERSION = "1.0.2";
 
-*/
-String SOFTWARE_VERSION = "1.0.0";
-
-#include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include <Adafruit_NeoPixel.h>
+#include <SoftwareSerial.h>
 
-SoftwareSerial mySerial(2,3); // RX, TX
 #define OWNERSHIP_WRITE_CHECK 123
 #define DEVICE_CONFIG_EEPROM_PACKET_ADDRESS 0
 
@@ -33,6 +34,10 @@ typedef struct {
   int  writeCycleCount;
 } device_config;
 
+
+
+SoftwareSerial mySerial(2,3); // RX, TX
+
 device_config defaultDeviceConfig = {
   OWNERSHIP_WRITE_CHECK,
   50,
@@ -46,7 +51,6 @@ device_config defaultDeviceConfig = {
 device_config deviceConfig;
 
 void(* resetFunc) (void) = 0;
-
 
 #define NEO_PIXEL_PIN 6 // Arduino pin number (most are valid)
 #define NUM_PIXEL 29
@@ -67,7 +71,6 @@ String deviceConfigDebugString(device_config _deviceConfig) {
          "green=" + String(_deviceConfig.green) + ", " +
          "blue=" + String(_deviceConfig.blue) + ", " +
          "writeCycleCount=" + String(_deviceConfig.writeCycleCount) + "}";
-
 }
 
 String deviceConfigToPacketString(device_config _deviceConfig) {
@@ -77,46 +80,46 @@ String deviceConfigToPacketString(device_config _deviceConfig) {
          ";W:" + String(_deviceConfig.writeCycleCount);
 }
 
+void sendNodeMCU(String str) {
+  mySerial.println(str);
+}
+
 void setup() {
 
   Serial.println("Initializing mini infinity mirror software (Version: " + SOFTWARE_VERSION + ")");
   // put your setup code here, to run once:
   Serial.begin(9600);
-  mySerial.begin(9600);
-
-  mySerial.println("Starting Arduino");
-  Serial.println("Pulling device config from EEPROM....");
+  mySerial.begin(19200);
+  Serial.println(F("Starting Arduino"));
+  Serial.println(F("Pulling device config from EEPROM...."));
   device_config eepromDeviceConfig;
   EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, eepromDeviceConfig);
   if (eepromDeviceConfig.ownership != OWNERSHIP_WRITE_CHECK) {
     //initialize default
-    Serial.println("Wrong ownership in EEPROM. Using default device config");
+    Serial.println(F("Wrong ownership in EEPROM. Using default device config"));
     eepromDeviceConfig = defaultDeviceConfig;
   }
   deviceConfig = eepromDeviceConfig;
   Serial.println("Device config: " + deviceConfigDebugString(deviceConfig));
 
-  Serial.println("Configuring strip...");
+  Serial.println(F("Configuring LED strip..."));
   strip.begin();
   strip.setBrightness(deviceConfig.intensity * 2);
   strip.show();
 
-  Serial.println("Done intializing.");
+  Serial.println(F("Done intializing."));
 }
-
-
-
-
 
 void loop() {
   ESPUartListener();
+  delay(700);// some slow universal loop delay. else SoftwareSerial will fail.
   switch (deviceConfig._mode) {
     case STABLE_LIGHT_MODE:
       for (uint16_t i = 0; i < strip.numPixels(); i++) {
         strip.setPixelColor(i, getUserConfiguredStripColor());
         strip.show();
       }
-      delay(700); // needed else, SoftwareSerial will receive gibberish
+      
       break;
 
     case LIGHT_SPIN_LIGHT_MODE:
@@ -164,9 +167,8 @@ void ESPUartListener() {
   }
 
   if (stringReady) {
-    Serial.println("From ESP: " + incommingStr);
+    Serial.println("From ESP: [" + incommingStr + "]");
     String cmd = getStrPart(incommingStr, '-', 0);
-    Serial.println("From ESP COMMAND:" + cmd);
     if (cmd.equals("SAVE")) {
       String dataPacket = getStrPart(incommingStr, '-', 1);
       // I:100;M:0;C:123,24,12
@@ -202,21 +204,21 @@ void ESPUartListener() {
           secondEepromDeviceConfig.green != greenVal ||
           secondEepromDeviceConfig.blue != blueVal) {
         Serial.println("Problem with saving the device config packet");
-        mySerial.println("EEROR-PROBLEM SAVING the device config packet");
+        sendNodeMCU("EEROR-PROBLEM SAVING the device config packet");
       } else {
-        mySerial.println("OK-");
+        sendNodeMCU("OK-");
       }
       //      delay(10000);
-      Serial.println("Reseting with new config");
+      Serial.println("Resetting with new config");
       delay(200);//unsure why this delay is needed. resetFunc won't work correctly without
       resetFunc();
     } else if (cmd.equals("GET_CONFIG")) {
       device_config eepromDeviceConfig;
       EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, eepromDeviceConfig);
-      mySerial.println(deviceConfigToPacketString(eepromDeviceConfig));
+      sendNodeMCU(deviceConfigToPacketString(eepromDeviceConfig));
       Serial.println(deviceConfigToPacketString(eepromDeviceConfig));
     } else {
-      mySerial.println("INVALID_COMMAND-" + incommingStr);
+      sendNodeMCU("INVALID_COMMAND-" + incommingStr);
       Serial.println("SEND: INVALID_COMMAND-" + String(incommingStr));
     }
   }
@@ -230,7 +232,7 @@ uint32_t getUserConfiguredStripColor() {
 
 void lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
   if (group >= strip.numPixels()) {
-    Serial.println("ERROR: lightSpin() group need to be less than numPixels");
+//    Serial.println("ERROR: lightSpin() group need to be less than numPixels");
     return;
   }
   for (uint16_t i = 0; i < group; i++) {
@@ -260,8 +262,9 @@ void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
     delay(wait);
     ESPUartListener();
   }
-
-  delay(1400);
+  delay(700);
+  ESPUartListener();
+  delay(700);
   ESPUartListener();
   for (int i = top; i >= 0; i--) {
     strip.setBrightness(i);
