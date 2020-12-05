@@ -3,6 +3,9 @@
  * 1.0.1 Remove software serial with hardware serial
  * 1.0.2 Remove heavy config saving and requesting process out of AsyncRequest context
  * 1.0.3 Reuse software serial + add SPIFFS
+ * 1.0.4 Fix bug device_config deepCopy return null bug ;(
+ * 1.1.0 When there are nodes connected to this AP --> decrease the config refresh rate to boost user experience
+ * 1.1.1 Auto scaling config refresh rate when there are no connected devices and there are.
  */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -13,7 +16,7 @@
 
 SoftwareSerial mySerial(5,4); // RX, TX
 
-const char* SOFTWARE_VERSION = "1.0.3";
+const char* SOFTWARE_VERSION = "1.1.1";
 const char* ssid     = "LL Mini Infinity Mirror";
 const char* password = "123456789";
 
@@ -39,6 +42,7 @@ device_config deepCopy(device_config other) {
   thisConfig.red = other.red;
   thisConfig.green = other.green;
   thisConfig.blue = other.blue;
+  return thisConfig;
 }
 
 device_config toSavePayload;
@@ -81,7 +85,7 @@ String update_device_config_from_arduino_status;
 boolean update_device_config_from_arduino_success = true;
 boolean saveConfigToArduino() {
   Serial.print(F("Demanding Arduino to save packet: "));
-  Serial.println(construct_config_packet(deviceConfig));
+  Serial.println(construct_config_packet(toSavePayload));
   sendArduino(construct_config_packet(toSavePayload));
   unsigned long startRequestTimer = millis();
   #define TIMEOUT 5000
@@ -245,8 +249,8 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   Serial.println("Waiting for Arduino to wake up...");
-  delay(1000);
-  update_device_config_from_arduino(4000);
+  delay(2000);
+  update_device_config_from_arduino_success = update_device_config_from_arduino(4000);
   Serial.print(F("Device config: "));
   Serial.println(construct_config_packet(deviceConfig));
 
@@ -256,10 +260,12 @@ void setup() {
   }
   
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    Serial.println("HTTP_GET /");
     request->send(SPIFFS, "/index.html", String(), false, processor);
   });
   
   server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request){
+    Serial.println("HTTP_POST /save");
     for(int i=0;i<request->params();i++){
       AsyncWebParameter* p = request->getParam(i);
       if (p->name().equals("intensity")) {
@@ -282,11 +288,14 @@ void setup() {
   server.begin();
 }
 
-#define CONFIG_REFRESH_RATE 86400000 // 1 days
+#define MAX_CONFIG_REFRESH_RATE 86400000 // 1 days
+#define MIN_CONFIG_REFRESH_RATE 100000
 #define CHECK_DIRTY_PAYLOAD_PERIOD 2000
 
 unsigned long checkUpdateConfigRefreshTimer = millis();
 unsigned long checkDirtyPayloadTimer = millis();
+unsigned long checkNumAccessTimer = millis();
+unsigned long  config_refresh_rate = MAX_CONFIG_REFRESH_RATE;
 
 void loop() {
   // have timer to avoid multiple save at a single time.
@@ -296,10 +305,20 @@ void loop() {
     checkDirtyPayloadTimer = millis();
   }
   
-  if ((millis() - checkUpdateConfigRefreshTimer) > CONFIG_REFRESH_RATE) {
+  if ((millis() - checkUpdateConfigRefreshTimer) > config_refresh_rate) {
     update_device_config_from_arduino_success = update_device_config_from_arduino(2000);
     checkUpdateConfigRefreshTimer = millis();
   }
 
+  if ((millis() - checkNumAccessTimer) > 2000) {
+    int numAccess = WiFi.softAPgetStationNum();
+    if (numAccess == 0) {
+      config_refresh_rate = MAX_CONFIG_REFRESH_RATE;
+    } else {
+      config_refresh_rate = MIN_CONFIG_REFRESH_RATE;
+    }
+    checkNumAccessTimer = millis();
+  }
+  
   handleAdminUartCmd();
 }

@@ -9,7 +9,7 @@
     * Light spin
     * Night mode
     * Grow and blow
- * RGB Swipe
+ * RGB Swipes
  * Rainbow Cycle
  * Smooth rainbow transition
  * Theater chase rainbow
@@ -40,22 +40,60 @@ void setup() {
 }
 
 void loop() {
-  // Some example procedures showing how to display to the pixels:
-//  colorWipe(strip.Color(255, 0, 0), 50); // Red
-//  colorWipe(strip.Color(0, 255, 0), 50); // Green
-//  colorWipe(strip.Color(0, 0, 255), 50); // Blue
-//  colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
-//  // Send a theater pixel chase in...
-//  theaterChase(strip.Color(127, 127, 127), 50); // White
-//  theaterChase(strip.Color(127, 0, 0), 50); // Red
-//  theaterChase(strip.Color(0, 0, 127), 50); // Blue
-//
+//  lightshow01();
 
-//  rainbow(20);
-//  rainbowCycle(40);
-//  theaterChaseRainbow(50);
-//  lightSpin(strip.Color(0, 255, 0), 5, 10000, 40);
-    nightMode(strip.Color(0, 255, 0), 80, 50);
+//  blackHoleTravel(5, 5, 20);
+//  delay(1000);
+  lightshow02();
+  delay(2000);
+}
+
+void lightshow02() {
+  uint8_t waits[] = {20, 30, 45, 55, 60};
+  uint8_t wait = 70;
+  for (int i=0; i<5; i++) {
+    blackHoleTravelRight(4, 0, random(0, strip.numPixels()), wait - waits[i]);
+    delay(1000);
+  }
+
+}
+
+void lightshow01() {
+  colorWipe(strip.Color(255, 0, 0), 50); // Red
+  colorWipe(strip.Color(0, 255, 0), 50); // Green
+  colorWipe(strip.Color(0, 0, 255), 50); // Blue
+  colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
+  // Send a theater pixel chase in...
+  theaterChase(strip.Color(127, 127, 127), 50); // White
+  theaterChase(strip.Color(127, 0, 0), 50); // Red
+  theaterChase(strip.Color(0, 0, 127), 50); // Blue
+  rainbowCycle(10);
+  smoothRainbowCycle(10);
+  theaterChaseRainbow(30);
+  lightSpin(strip.Color(0, 255, 0), 5, 00, 40);
+  nightMode(strip.Color(0, 255, 0), 20, 50);
+  strip.setBrightness(50);
+}
+
+
+void blackHoleTravelRight(uint8_t lightLength, uint8_t startPos, uint8_t endPos, uint8_t wait) {
+  if (lightLength < 1 || startPos < 0 || endPos > strip.numPixels()) {
+    Serial.println(F("Input error blackHoleTravelRight"));
+    return;
+  }
+  
+  for (int i=startPos; i<=endPos+lightLength; i++) {
+    Serial.println("i " + i);
+    if (i <= endPos) {
+      strip.setPixelColor(i, strip.Color(0, 255, 0));
+    }
+    
+    if (i - lightLength >= 0) {
+      strip.setPixelColor(i-lightLength, strip.Color(0, 0, 0));
+    }
+    strip.show();
+    delay(wait);
+  }
 }
 
 void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
@@ -113,7 +151,7 @@ void colorWipe(uint32_t c, uint8_t wait) {
   }
 }
 
-void rainbow(uint8_t wait) {
+void smoothRainbowCycle(uint8_t wait) {
   uint16_t i, j;
   Serial.println("Start rainbow");
   

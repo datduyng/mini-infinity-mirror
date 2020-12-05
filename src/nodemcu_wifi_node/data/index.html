@@ -20,7 +20,6 @@
   <body>
     <div style="margin: auto; width: 375px">
       <h2 style="text-align: center">Mini infinity mirror control</h2>
-
       <h4>General setting</h4>
       <div class="para-spacing">
         <label for="intensity">Intensity: 5</label>
@@ -40,7 +39,7 @@
         <input type="color" value="#e66465" id="color-picker" />
         <div class="para-spacing">
           <br />
-          <input type="radio" id="lightmode-0" name="lightmode" value="0" />
+          <input type="radio" id="lightmode-0" name="lightmode" value="0" required/>
           <label for="male">Stable</label><br /><br />
           <input type="radio" id="lightmode-1" name="lightmode" value="1" />
           <label for="female">Light spin</label><br /><br />
@@ -64,7 +63,9 @@
       </div>
       <br />
       <br />
+      <h1 id='error-section'></h1>
       <button
+      	id="save-config-btn"
         onclick="save_config()"
         style="width: 80px; height: 40px; font-size: 20px"
       >
@@ -160,9 +161,21 @@ Debug: ${JSON.stringify(debug, undefined, 2)}
             `;
       }
 
+      function save_config_timeout() {
+        	setTimeout(() => {
+	      		document.getElementById("error-section").innerHTML = ``;
+        		document.getElementById("save-config-btn").disabled = false;
+        	}, 3000); // hard delay to avoid user overload server with requests
+      }
       function save_config() {
+      	if (!document.querySelector('input[name="lightmode"]:checked')?.value) {
+      		document.getElementById("error-section").innerHTML = `
+      			<p style='color:red'>A lightmode is required</p>
+      		`;
+      		return;
+      	}
         let rgb = hexToRgb(document.getElementById("color-picker").value);
-
+        document.getElementById("save-config-btn").disabled = true;
         fetch("http://192.168.1.1/save", {
           method: "POST",
           headers: {
@@ -172,13 +185,13 @@ Debug: ${JSON.stringify(debug, undefined, 2)}
             intensity: parseInt(
               document.getElementById("intensity-slider").value
             ),
-            _mode: document.querySelector('input[name="lightmode"]:checked')
-              .value,
+            _mode: document.querySelector('input[name="lightmode"]:checked')?.value,
             red: rgb.r,
             green: rgb.g,
             blue: rgb.b,
           }),
-        });
+        }).then(save_config_timeout)
+        .catch(save_config_timeout);
       }
     </script>
   </body>
