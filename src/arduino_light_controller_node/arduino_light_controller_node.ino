@@ -37,8 +37,6 @@ typedef struct {
   int  writeCycleCount;
 } device_config;
 
-
-
 SoftwareSerial mySerial(2,3); // RX, TX
 
 device_config defaultDeviceConfig = {

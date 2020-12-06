@@ -1,4 +1,6 @@
 /*
+ * Author: Dat Nguyen
+ * Description: 
  * 1.0.0 Initial
  * 1.0.1 Remove software serial with hardware serial
  * 1.0.2 Remove heavy config saving and requesting process out of AsyncRequest context
@@ -6,17 +8,37 @@
  * 1.0.4 Fix bug device_config deepCopy return null bug ;(
  * 1.1.0 When there are nodes connected to this AP --> decrease the config refresh rate to boost user experience
  * 1.1.1 Auto scaling config refresh rate when there are no connected devices and there are.
+ * 1.2.0 Add LED light strip manament in this board
+ * 1.3.0 Add toggle switches to turn on/off wifi and LED strip power
  */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <Hash.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <SoftwareSerial.h>
+#include <EEPROM.h> //https://arduino-esp8266.readthedocs.io/en/latest/libraries.html#eeprom
+#include <Adafruit_NeoPixel.h>
 
-SoftwareSerial mySerial(5,4); // RX, TX
+const char* SOFTWARE_VERSION = "1.3.0";
 
-const char* SOFTWARE_VERSION = "1.1.1";
+#define SOFT_SWITCH_POWER_MANAGEMENT_PIN 12 // ~D6
+#define OWNERSHIP_WRITE_CHECK 123
+#define DEVICE_CONFIG_EEPROM_PACKET_ADDRESS 0
+
+#define STABLE_LIGHT_MODE 0
+#define LIGHT_SPIN_LIGHT_MODE 1
+#define NIGHT_MODE_LIGHT_MODE 2
+#define GLOW_AND_BLOW_LIGHT_MODE 3
+
+#define RGB_WIPE_LIGHT_MODE 100
+#define RAINBOW_CYCLE_LIGHT_MODE 101
+#define SMOOTH_RAINBOW_TRANSITION_LIGHT_MODE 102
+#define THEATHER_CHASE_RAINBOW_LIGHT_MODE 103
+#define LIGHT_SHOW_LIGHT_MODE01 104
+#define LIGHT_SHOW_LIGHT_MODE02 105
+
+void(* resetFunc) (void) = 0;
+
 const char* ssid     = "LL Mini Infinity Mirror";
 const char* password = "123456789";
 
@@ -25,8 +47,9 @@ AsyncWebServer server(80);
 IPAddress local_IP(192, 168, 1, 1);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 0, 0);
-
+  
 typedef struct {
+  byte ownership;
   byte intensity;
   byte _mode;
   byte red;
@@ -34,21 +57,213 @@ typedef struct {
   byte blue;  
   int eepromWriteCycleCount;
 } device_config __attribute__((packed));
+
 device_config deviceConfig;
-device_config deepCopy(device_config other) {
-  device_config thisConfig;
-  thisConfig.intensity = other.intensity;
-  thisConfig._mode = other._mode;
-  thisConfig.red = other.red;
-  thisConfig.green = other.green;
-  thisConfig.blue = other.blue;
-  return thisConfig;
+device_config toSavePayload;
+device_config defaultDeviceConfig = {
+  OWNERSHIP_WRITE_CHECK,
+  50,
+  SMOOTH_RAINBOW_TRANSITION_LIGHT_MODE,
+  0,
+  0,
+  250,
+  1
+};
+
+
+volatile boolean dirtySavePacket = false;
+volatile boolean resetDeviceMode = false;
+boolean isDirtyCmdProcess() {
+  return dirtySavePacket || resetDeviceMode;// || digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN) == HIGH;
+}
+String arduinoErrorRequestError = "No error";
+
+/**************************LED STRIP*********************/
+#define NEO_PIXEL_PIN 14 // ~D5
+#define NUM_PIXEL 30
+// Parameter 3 = pixel type flags, add together as needed:
+//   NEO_KHZ800  800 KHz bitstream (most NeoPixel products w/WS2812 LEDs)
+//   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
+//   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
+//   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
+//   NEO_RGBW    Pixels are wired for RGBW bitstream (NeoPixel RGBW products)
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXEL, NEO_PIXEL_PIN, NEO_GRB + NEO_KHZ800);
+
+boolean stableLightMode(uint32_t color) {
+  for (uint16_t i = 0; i < strip.numPixels(); i++) {
+    strip.setPixelColor(i, color);
+  }
+  strip.show();
 }
 
-device_config toSavePayload;
-boolean dirtySavePacket = false;
+uint32_t getUserConfiguredStripColor() {
+  return strip.Color(deviceConfig.red, deviceConfig.green, deviceConfig.blue);
+}
 
-String arduinoErrorRequestError = "No error";
+//TODO: fix this function
+void lightshow01() {
+  strip.setBrightness(80);
+  colorWipe(strip.Color(255, 0, 0), 50); // Red
+  colorWipe(strip.Color(0, 255, 0), 50); // Green
+  colorWipe(strip.Color(0, 0, 255), 50); // Blue
+  colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
+  // Send a theater pixel chase in...
+  theaterChase(strip.Color(127, 127, 127), 50); // White
+  theaterChase(strip.Color(127, 0, 0), 50); // Red
+  theaterChase(strip.Color(0, 0, 127), 50); // Blue
+  rainbowCycle(10);
+  smoothRainbowCycle(10);
+  theaterChaseRainbow(30);
+  lightSpin(strip.Color(0, 255, 0), 5, 00, 40);
+  nightMode(strip.Color(0, 255, 0), 20, 50);
+}
+
+void theaterChaseRainbow(uint8_t wait) {
+  if (isDirtyCmdProcess()) { return; }
+  for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
+    for (int q=0; q < 3; q++) {
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
+      }
+      strip.show();
+      if (isDirtyCmdProcess()) { return; }
+      delay(wait);
+
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      }
+      if (isDirtyCmdProcess()) { return; }
+    }
+  }
+}
+
+void colorWipe(uint32_t c, uint8_t wait) {
+  if (isDirtyCmdProcess()) { return; }
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
+    strip.show();
+    delay(wait);
+    if (isDirtyCmdProcess()) { return; }
+  }
+}
+
+void lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
+  if (isDirtyCmdProcess()) { return; }
+  if (group >= strip.numPixels()) {
+//    Serial.println("ERROR: lightSpin() group need to be less than numPixels");
+    return;
+  }
+  for (uint16_t i = 0; i < group; i++) {
+    strip.setPixelColor(i, color);
+    strip.show();
+  }
+
+  for (int i = group; i < numSteps; i++) {
+    strip.setPixelColor(i % strip.numPixels(), color);
+    strip.setPixelColor((i - group) % strip.numPixels(), strip.Color(0, 0, 0));
+    strip.show();
+    delay(wait);
+    if (isDirtyCmdProcess()) { return; }
+  }
+}
+
+void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
+  if (isDirtyCmdProcess()) { return; }
+  for (int i = 0; i <= top; i++) {
+    strip.setBrightness(i);
+    for (uint16_t j = 0; j < strip.numPixels(); j++) {
+      strip.setPixelColor(j, color);
+    }
+    strip.show();
+    if (i < 40) {
+      delay(wait);
+    }
+    delay(wait);
+    if (isDirtyCmdProcess()) { return; }
+  }
+  delay(700);
+  if (isDirtyCmdProcess()) { return; }
+  delay(700);
+  if (isDirtyCmdProcess()) { return; }
+  for (int i = top; i >= 0; i--) {
+    strip.setBrightness(i);
+    for (uint16_t j = 0; j < strip.numPixels(); j++) {
+      strip.setPixelColor(j, color);
+    }
+    strip.show();
+    if (i < 40) {
+      delay(wait);
+    }
+    delay(wait);
+    if (isDirtyCmdProcess()) { return; }
+  }
+}
+
+void smoothRainbowCycle(uint8_t wait) {
+  if (isDirtyCmdProcess()) { return; }
+  uint16_t i, j;
+  for(j=0; j<256; j++) {
+    for(i=0; i<strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel((i+j) & 255));
+    }
+    strip.show();
+    delay(wait);
+    if (isDirtyCmdProcess()) { return; }
+  }
+}
+
+// Slightly different, this makes the rainbow equally distributed throughout
+void rainbowCycle(uint8_t wait) {
+  if (isDirtyCmdProcess()) { return; }
+  uint16_t i, j;
+
+  for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
+    for(i=0; i< strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
+    }
+    strip.show();
+    delay(wait);
+    if (isDirtyCmdProcess()) { return; }
+  }
+}
+
+//Theatre-style crawling lights.
+void theaterChase(uint32_t c, uint8_t wait) {
+  if (isDirtyCmdProcess()) { return; }
+  for (int j=0; j<10; j++) {  //do 10 cycles of chasing
+    for (int q=0; q < 3; q++) {
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, c);    //turn every third pixel on
+      }
+      strip.show();
+      if (isDirtyCmdProcess()) { return; }
+      delay(wait);
+
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      }
+    }
+    if (isDirtyCmdProcess()) { return; }
+  }
+}
+
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos) {
+  WheelPos = 255 - WheelPos;
+  if(WheelPos < 85) {
+    return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  }
+  if(WheelPos < 170) {
+    WheelPos -= 85;
+    return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+  WheelPos -= 170;
+  return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
+
+/*************************END LED STRIP******************/
+
 
 /**************************UTILS*************************/
 String getStrPart(String data, char separator, int index)
@@ -68,9 +283,6 @@ String getStrPart(String data, char separator, int index)
   return found>index ? data.substring(strIndex[0], strIndex[1]) : "";
 }
 
-void sendArduino(String str) {
-  mySerial.println(str);
-}
 /*************************END*UTILS***********************/
 
 String construct_config_packet(device_config deviceConfig) {
@@ -83,81 +295,66 @@ String save_config_to_arduino_status;
 boolean save_config_to_arduino_success = true;
 String update_device_config_from_arduino_status;
 boolean update_device_config_from_arduino_success = true;
-boolean saveConfigToArduino() {
-  Serial.print(F("Demanding Arduino to save packet: "));
-  Serial.println(construct_config_packet(toSavePayload));
-  sendArduino(construct_config_packet(toSavePayload));
-  unsigned long startRequestTimer = millis();
-  #define TIMEOUT 5000
-  unsigned long currentTime = millis();
-  do {
-    if ((currentTime - startRequestTimer) > TIMEOUT) {
-      Serial.println("TIMEOUT");
-      save_config_to_arduino_status = "Timeout while saving config";
-      return false;
-    }
 
-    String cmd = "";
-    if (mySerial.available()) {
-      String packet = mySerial.readStringUntil('\n');
-      Serial.println("Received a packet: " + String(packet));
-      cmd = getStrPart(packet, '-', 0);
-      if (cmd.equals("OK")) {
-        save_config_to_arduino_status = "OK ";
-        deviceConfig = deepCopy(toSavePayload);
-        return true;
-      } else {
-        save_config_to_arduino_status = "Unexpected packet. " + String(packet);
-        return false;
-      }
-    }
-    currentTime = millis();
-  } while(!mySerial.available());
-  save_config_to_arduino_status = "Unexpected error.";
-  return false;
+String deviceConfigDebugString(device_config _deviceConfig) {
+  return "{ ownership=" + String(_deviceConfig.ownership) + ", " +
+         "intensity=" + String(_deviceConfig.intensity) + ", " +
+         "_mode=" + String(_deviceConfig._mode) + ", " +
+         "red=" + String(_deviceConfig.red) + ", " +
+         "green=" + String(_deviceConfig.green) + ", " +
+         "blue=" + String(_deviceConfig.blue) + ", " +
+         "writeCycleCount=" + String(_deviceConfig.eepromWriteCycleCount) + "}";
 }
 
-boolean update_device_config_from_arduino(uint16_t timeout) {
-  sendArduino("GET_CONFIG-");
-  unsigned long startRequestTimer = millis();
-  unsigned long currentTime = millis();
-  do {
-    if ((currentTime - startRequestTimer) > timeout) {
-      Serial.println(F("TIMEOUT"));
-      update_device_config_from_arduino_status = "Timout while requesting for config from Arduino";
-      return false;
-    }
-    String cmd = "";
-    Serial.println(F("Requesting"));
-    if (mySerial.available()) {
-      String packet = mySerial.readStringUntil('\n');
-      Serial.println("Received: " + String(packet));
-      cmd = getStrPart(packet, '-', 0);
-      if (cmd.equals("DATA")) {
-        String dataPacket = getStrPart(packet, '-', 1);
-        // I:100;M:0;C:123,24,12;W:123
-        byte intensity = getStrPart(getStrPart(dataPacket, ';', 0), ':', 1).toInt();
-        byte _mode = getStrPart(getStrPart(dataPacket, ';', 1), ':', 1).toInt();
-        String rgbColorStr = getStrPart(getStrPart(dataPacket, ';', 2), ':', 1);
-        byte redVal = getStrPart(rgbColorStr, ',', 0).toInt();
-        byte greenVal = getStrPart(rgbColorStr, ',', 1).toInt();
-        byte blueVal = getStrPart(rgbColorStr, ',', 2).toInt();
-        byte eepromWriteCycleCount = getStrPart(getStrPart(dataPacket, ';', 3), ':', 1).toInt();
-        
-        deviceConfig = { intensity, _mode, redVal, greenVal, blueVal, eepromWriteCycleCount };
-        update_device_config_from_arduino_status = "success"; 
-        return true;
-      } else {
-        update_device_config_from_arduino_status = "Invalid data payload "+ String(packet);
-        return false;
-      }
-    }
-    
-    currentTime = millis();
-      
-  } while(!mySerial.available());
-  update_device_config_from_arduino_status = "Unexpected error.";
-  return false;
+boolean saveConfigToArduino() {
+  device_config eepromDeviceConfig;
+  EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, eepromDeviceConfig);
+
+  device_config deviceConfigSavePayload = {
+    OWNERSHIP_WRITE_CHECK,
+    toSavePayload.intensity,
+    toSavePayload._mode,
+    toSavePayload.red,
+    toSavePayload.green,
+    toSavePayload.blue,
+    (eepromDeviceConfig.ownership == OWNERSHIP_WRITE_CHECK) ? eepromDeviceConfig.eepromWriteCycleCount + 1 : 1
+  };
+  Serial.println("Saving " + deviceConfigDebugString(deviceConfigSavePayload));
+  EEPROM.put(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, deviceConfigSavePayload);
+  EEPROM.commit();
+  device_config secondEepromDeviceConfig;
+  EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, secondEepromDeviceConfig);
+  Serial.println("After save " + deviceConfigDebugString(secondEepromDeviceConfig));
+  //double check data here
+  if (secondEepromDeviceConfig.ownership != OWNERSHIP_WRITE_CHECK ||
+      secondEepromDeviceConfig.intensity != toSavePayload.intensity ||
+      secondEepromDeviceConfig._mode != toSavePayload._mode ||
+      secondEepromDeviceConfig.red != toSavePayload.red ||
+      secondEepromDeviceConfig.green != toSavePayload.green ||
+      secondEepromDeviceConfig.blue != toSavePayload.blue) {
+    Serial.println("Problem with saving the device config packet");
+    save_config_to_arduino_status = "EEROR-PROBLEM SAVING the device config packet";
+    return false;
+  }
+  save_config_to_arduino_status = "OK";
+  return true;
+}
+
+boolean update_device_config_from_arduino() {
+  Serial.println(F("Pulling device config from EEPROM..."));
+  device_config eepromDeviceConfig;
+  EEPROM.get(DEVICE_CONFIG_EEPROM_PACKET_ADDRESS, eepromDeviceConfig);
+  if (eepromDeviceConfig.ownership != OWNERSHIP_WRITE_CHECK) {
+    //initialize default
+    Serial.println(F("Wrong ownership in EEPROM. Using default device config"));
+    eepromDeviceConfig = defaultDeviceConfig;
+    deviceConfig = eepromDeviceConfig;
+    update_device_config_from_arduino_status = "Wrong ownership in EEPROM. Using default device config";
+    return false;
+  }
+  deviceConfig = eepromDeviceConfig;
+  update_device_config_from_arduino_status = "OK";
+  return true;
 }
 
 
@@ -178,18 +375,6 @@ void handleAdminUartCmd() {
     String adminPart = getStrPart(incommingStr, '+', 0);
     if (adminPart.equals("ADMIN")) {
       String cmd = getStrPart(incommingStr, '+', 1);
-      if (cmd.equals("SEND_NANO_TEST_CONFIG_PAYLOAD")) {
-        // ADMIN+SEND_NANO_TEST_CONFIG_PAYLOAD
-        device_config deviceConfig = { 88, 2, 1, 2, 3, 0 };
-        sendArduino(construct_config_packet(deviceConfig));
-      } else if (cmd.equals("NANO")) {
-        // ADMIN+NANO+SAVE-I:33;M:1;C:4,2,3
-        // ADMIN+NANO+GET_CONFIG-
-        String data = getStrPart(incommingStr, '+', 2);
-        sendArduino(data);
-      } else {
-        handle_admin_uart_error = "Invalid admin command: " + cmd;
-      }
     } else {
         handle_admin_uart_error = "Invalid command: " + incommingStr;
     }
@@ -231,34 +416,34 @@ String processor(const String& var){
 }
 /*******************END*RESPONSE*PROCESSOR******************/
 
+void setupInLowPowerModeAndDisableLED() {
+  WiFi.disconnect(true);
+  Serial.println(F("Enable lower power mode and disable LED"));
+  stableLightMode(strip.Color(0,0,0));
+  WiFi.mode(WIFI_OFF);
+}
+
 void setup() {
   Serial.begin(9600);
-  mySerial.begin(19200);
-  Serial.print("Setting AP (Access Point)…");
+  EEPROM.begin(50);
+  pinMode(SOFT_SWITCH_POWER_MANAGEMENT_PIN, INPUT_PULLUP);
+  Serial.println(F("Enable Access Point mode and enable LED strip"));
+  Serial.print(F("Setting AP (Access Point)…"));
   WiFi.persistent(false); 
-  Serial.print("Setting soft-AP configuration ... ");
+  Serial.print(F("Setting soft-AP configuration ... "));
   Serial.println(WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");
-
   // Remove the password parameter, if you want the AP (Access Point) to be open
   WiFi.softAP(ssid, password);
+  Serial.print(F("SoftAPIP: ")); Serial.println(WiFi.softAPIP());
+  Serial.print(F("Local IP: ")); Serial.println(WiFi.localIP());
 
-  IPAddress IP = WiFi.softAPIP();
-  Serial.print(F("AP IP address: "));
-  Serial.println(IP);
-  // Print ESP8266 Local IP Address
-  Serial.println(WiFi.localIP());
-
-  Serial.println("Waiting for Arduino to wake up...");
-  delay(2000);
-  update_device_config_from_arduino_success = update_device_config_from_arduino(4000);
-  Serial.print(F("Device config: "));
-  Serial.println(construct_config_packet(deviceConfig));
-
+  Serial.println(F("Setting up SPIFFS"));
   if(!SPIFFS.begin()){
     Serial.println("An Error has occurred while mounting SPIFFS");
     //error here
   }
-  
+
+
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     Serial.println("HTTP_GET /");
     request->send(SPIFFS, "/index.html", String(), false, processor);
@@ -286,6 +471,10 @@ void setup() {
   });
   
   server.begin();
+
+  Serial.println(F("Enabling LED strip"));
+  strip.begin();
+  strip.show();
 }
 
 #define MAX_CONFIG_REFRESH_RATE 86400000 // 1 days
@@ -297,28 +486,120 @@ unsigned long checkDirtyPayloadTimer = millis();
 unsigned long checkNumAccessTimer = millis();
 unsigned long  config_refresh_rate = MAX_CONFIG_REFRESH_RATE;
 
+byte previousPowerManagerMode = LOW;
 void loop() {
-  // have timer to avoid multiple save at a single time.
-  if ((millis() - checkDirtyPayloadTimer) > CHECK_DIRTY_PAYLOAD_PERIOD && dirtySavePacket) {
-    save_config_to_arduino_success = saveConfigToArduino();
-    dirtySavePacket = false;  
-    checkDirtyPayloadTimer = millis();
+  byte currentPowerManagerMode = digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN);
+  if (previousPowerManagerMode == LOW && currentPowerManagerMode == LOW) {
+    previousPowerManagerMode = currentPowerManagerMode;
+    return;
+    // nothing
+  } else if (previousPowerManagerMode == LOW && currentPowerManagerMode == HIGH) {
+    resetFunc();
+    return;
+  } else if (previousPowerManagerMode == HIGH && currentPowerManagerMode == LOW) {
+    setupInLowPowerModeAndDisableLED();
+  } else { // previousPowerManagerMode == HIGH && currentPowerManagerMode == HIGH
+    // nothing
   }
-  
-  if ((millis() - checkUpdateConfigRefreshTimer) > config_refresh_rate) {
-    update_device_config_from_arduino_success = update_device_config_from_arduino(2000);
-    checkUpdateConfigRefreshTimer = millis();
-  }
+  previousPowerManagerMode = currentPowerManagerMode;
 
-  if ((millis() - checkNumAccessTimer) > 2000) {
-    int numAccess = WiFi.softAPgetStationNum();
-    if (numAccess == 0) {
-      config_refresh_rate = MAX_CONFIG_REFRESH_RATE;
-    } else {
-      config_refresh_rate = MIN_CONFIG_REFRESH_RATE;
+  update_device_config_from_arduino_success = update_device_config_from_arduino();
+  Serial.print(F("Device config: "));
+  Serial.println(deviceConfigDebugString(deviceConfig));
+  strip.setBrightness(deviceConfig.intensity * 2);
+  stableLightMode(strip.Color(0,0,0));
+  strip.show();
+  checkDirtyPayloadTimer = millis();
+  while (1) {
+    if (digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN) == LOW) {
+      dirtySavePacket = false; 
+      resetDeviceMode = false;
+      break; 
     }
-    checkNumAccessTimer = millis();
-  }
+    // have timer to avoid multiple save at a single time.
+    if ((millis() - checkDirtyPayloadTimer) > CHECK_DIRTY_PAYLOAD_PERIOD && dirtySavePacket) {
+      save_config_to_arduino_success = saveConfigToArduino();
+      dirtySavePacket = false;  
+      resetDeviceMode = true;
+      checkDirtyPayloadTimer = millis();
+    }
+    if ((millis() - checkUpdateConfigRefreshTimer) > config_refresh_rate) {
+      update_device_config_from_arduino_success = update_device_config_from_arduino();
+      checkUpdateConfigRefreshTimer = millis();
+    }
+    if ((millis() - checkNumAccessTimer) > 2000) {
+      int numAccess = WiFi.softAPgetStationNum();
+      if (numAccess == 0) {
+        config_refresh_rate = MAX_CONFIG_REFRESH_RATE;
+      } else {
+        config_refresh_rate = MIN_CONFIG_REFRESH_RATE;
+      }
+      checkNumAccessTimer = millis();
+    }
+    
+    handleAdminUartCmd();
+
+
+    if (resetDeviceMode) {
+      Serial.println("Restarting");
+      resetDeviceMode = false;
+      onResetStrip();
+      break;
+    }
+
+    switch (deviceConfig._mode) {
+      case STABLE_LIGHT_MODE:
+        stableLightMode(getUserConfiguredStripColor());   
+        break;
   
-  handleAdminUartCmd();
+      case LIGHT_SPIN_LIGHT_MODE:
+        lightSpin(getUserConfiguredStripColor(), 5, 10000, 40);
+        break;
+  
+      case NIGHT_MODE_LIGHT_MODE:
+        nightMode(getUserConfiguredStripColor(), 80, deviceConfig.intensity);
+        break;
+  
+      case GLOW_AND_BLOW_LIGHT_MODE:
+        break;
+  
+      case RGB_WIPE_LIGHT_MODE:
+        colorWipe(strip.Color(255, 0, 0), 50); // Red
+        colorWipe(strip.Color(0, 255, 0), 50); // Green
+        colorWipe(strip.Color(0, 0, 255), 50); // Blue
+        colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
+        break;
+  
+      case RAINBOW_CYCLE_LIGHT_MODE:
+        rainbowCycle(20);
+        break;
+  
+      case SMOOTH_RAINBOW_TRANSITION_LIGHT_MODE:
+        smoothRainbowCycle(40);
+        break;
+  
+      case THEATHER_CHASE_RAINBOW_LIGHT_MODE:
+        theaterChaseRainbow(50);
+        break;
+  
+      case LIGHT_SHOW_LIGHT_MODE01:
+        lightshow01();
+        break;
+  
+      case LIGHT_SHOW_LIGHT_MODE02:
+        break;
+  
+      default:
+        break;
+    }
+  }
+}
+
+
+
+void onResetStrip() {
+  resetDeviceMode = false;
+  
+  // reread mode info here
+  Serial.println("onResetStrip....");
 }
