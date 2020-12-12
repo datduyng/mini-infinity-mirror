@@ -1,26 +1,27 @@
 /*
- * Author: Dat Nguyen
- * Description: 
- * 1.0.0 Initial
- * 1.0.1 Remove software serial with hardware serial
- * 1.0.2 Remove heavy config saving and requesting process out of AsyncRequest context
- * 1.0.3 Reuse software serial + add SPIFFS
- * 1.0.4 Fix bug device_config deepCopy return null bug ;(
- * 1.1.0 When there are nodes connected to this AP --> decrease the config refresh rate to boost user experience
- * 1.1.1 Auto scaling config refresh rate when there are no connected devices and there are.
- * 1.2.0 Add LED light strip manament in this board
- * 1.3.0 Add toggle switches to turn on/off wifi and LED strip power
- * 1.3.1 Add more light mode
- */
+   Author: Dat Nguyen
+   Description:
+   1.0.0 Initial
+   1.0.1 Remove software serial with hardware serial
+   1.0.2 Remove heavy config saving and requesting process out of AsyncRequest context
+   1.0.3 Reuse software serial + add SPIFFS
+   1.0.4 Fix bug device_config deepCopy return null bug ;(
+   1.1.0 When there are nodes connected to this AP --> decrease the config refresh rate to boost user experience
+   1.1.1 Auto scaling config refresh rate when there are no connected devices and there are.
+   1.2.0 Add LED light strip manament in this board
+   1.3.0 Add toggle switches to turn on/off wifi and LED strip power
+   1.3.1 Add more light mode
+   1.4.0 Turn off wifi after a certain time(1.5 hours) when turn on
+*/
 #include <Arduino.h>
+#include <EEPROM.h> //https://arduino-esp8266.readthedocs.io/en/latest/libraries.html#eeprom
 #include <ESP8266WiFi.h>
 #include <Hash.h>
+#include <Adafruit_NeoPixel.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <EEPROM.h> //https://arduino-esp8266.readthedocs.io/en/latest/libraries.html#eeprom
-#include <Adafruit_NeoPixel.h>
 
-const char* SOFTWARE_VERSION = "1.3.1";
+const char* SOFTWARE_VERSION = "1.4.0";
 
 #define SOFT_SWITCH_POWER_MANAGEMENT_PIN 12 // ~D6
 #define OWNERSHIP_WRITE_CHECK 123
@@ -48,14 +49,14 @@ AsyncWebServer server(80);
 IPAddress local_IP(192, 168, 1, 1);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 0, 0);
-  
+
 typedef struct {
   byte ownership;
   byte intensity;
   byte _mode;
   byte red;
   byte green;
-  byte blue;  
+  byte blue;
   int eepromWriteCycleCount;
 } device_config __attribute__((packed));
 
@@ -79,7 +80,9 @@ unsigned long lastSoftPowerReadTimer = millis();
 boolean isDirtyCmdProcess() {
   if (millis() - lastSoftPowerReadTimer > 500) {
     lastSoftPowerReadTimer = millis();
-    if (digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN) == LOW) { return true; }
+    if (digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN) == LOW) {
+      return true;
+    }
   }
   return dirtySavePacket || resetDeviceMode;
 }
@@ -97,7 +100,9 @@ String arduinoErrorRequestError = "No error";
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXEL, NEO_PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
 void stableLightMode(uint32_t color) {
-  if (isDirtyCmdProcess()) { return; }
+  if (isDirtyCmdProcess()) {
+    return;
+  }
   for (uint16_t i = 0; i < strip.numPixels(); i++) {
     strip.setPixelColor(i, color);
   }
@@ -111,125 +116,177 @@ uint32_t getUserConfiguredStripColor() {
 //TODO: fix this function
 boolean lightshow01() {
   strip.setBrightness(80);
-  if (!colorWipe(strip.Color(255, 0, 0), 50)) { return false; }; // Red
-  if (!colorWipe(strip.Color(0, 255, 0), 50)) { return false; }; // Green
-  if (!colorWipe(strip.Color(0, 0, 255), 50)) { return false; }; // Blue
-  if (!colorWipe(strip.Color(0, 0, 0, 255), 50)) { return false; }; // White RGBW
+  if (!colorWipe(strip.Color(255, 0, 0), 50)) {
+    return false;
+  }; // Red
+  if (!colorWipe(strip.Color(0, 255, 0), 50)) {
+    return false;
+  }; // Green
+  if (!colorWipe(strip.Color(0, 0, 255), 50)) {
+    return false;
+  }; // Blue
+  if (!colorWipe(strip.Color(0, 0, 0, 255), 50)) {
+    return false;
+  }; // White RGBW
   // Send a theater pixel chase in...
-  if (!theaterChase(strip.Color(127, 127, 127), 50)) { return false; }; // White
-  if (!theaterChase(strip.Color(127, 0, 0), 50)) { return false; }; // Red
-  if (!theaterChase(strip.Color(0, 0, 127), 50)) { return false; }; // Blue
-  if (!rainbowCycle(10)) { return false; };
-  if (!smoothRainbowCycle(10)) { return false; };
-  if (!theaterChaseRainbow(30)) { return false; };
-  if (!lightSpin(strip.Color(0, 255, 0), 5, 00, 40)) { return false; };
-  if (!nightMode(strip.Color(0, 255, 0), 20, 50)) { return false; };
+  if (!theaterChase(strip.Color(127, 127, 127), 50)) {
+    return false;
+  }; // White
+  if (!theaterChase(strip.Color(127, 0, 0), 50)) {
+    return false;
+  }; // Red
+  if (!theaterChase(strip.Color(0, 0, 127), 50)) {
+    return false;
+  }; // Blue
+  if (!rainbowCycle(10)) {
+    return false;
+  };
+  if (!smoothRainbowCycle(10)) {
+    return false;
+  };
+  if (!theaterChaseRainbow(30)) {
+    return false;
+  };
+  if (!lightSpin(strip.Color(0, 255, 0), 5, 00, 40)) {
+    return false;
+  };
+  if (!nightMode(strip.Color(0, 255, 0), 20, 50)) {
+    return false;
+  };
   return true;
 }
 
 boolean theaterChaseRainbow(uint8_t wait) {
-  if (isDirtyCmdProcess()) { return false; }
-  for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
-    for (int q=0; q < 3; q++) {
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
+  for (int j = 0; j < 256; j++) {   // cycle all 256 colors in the wheel
+    for (int q = 0; q < 3; q++) {
+      for (uint16_t i = 0; i < strip.numPixels(); i = i + 3) {
+        strip.setPixelColor(i + q, Wheel( (i + j) % 255)); //turn every third pixel on
       }
       strip.show();
-      if (isDirtyCmdProcess()) { return false; }
+      if (isDirtyCmdProcess()) {
+        return false;
+      }
       delay(wait);
 
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      for (uint16_t i = 0; i < strip.numPixels(); i = i + 3) {
+        strip.setPixelColor(i + q, 0);      //turn every third pixel off
       }
-      
+
     }
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 boolean colorWipe(uint32_t c, uint8_t wait) {
-  if (isDirtyCmdProcess()) { return false; }
-  for(uint16_t i=0; i<strip.numPixels(); i++) {
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
+  for (uint16_t i = 0; i < strip.numPixels(); i++) {
     strip.setPixelColor(i, c);
     strip.show();
     delay(wait);
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 void showStrip() {
- strip.show();
+  strip.show();
 }
 void setPixel(int Pixel, byte red, byte green, byte blue) {
- strip.setPixelColor(Pixel, strip.Color(red, green, blue));
+  strip.setPixelColor(Pixel, strip.Color(red, green, blue));
 }
 
 void setAll(byte red, byte green, byte blue) {
-  for(int i = 0; i < NUM_PIXEL; i++ ) {
+  for (int i = 0; i < NUM_PIXEL; i++ ) {
     setPixel(i, red, green, blue);
   }
   showStrip();
 }
 
-boolean FadeInOut(byte red, byte green, byte blue, byte wait){
-  if (isDirtyCmdProcess()) { return false; }
-  float r, g, b;
-     
-  for(int k = 0; k < 256; k=k+1) {
-    r = (k/256.0)*red;
-    g = (k/256.0)*green;
-    b = (k/256.0)*blue;
-    setAll(r,g,b);
-    showStrip();
-    delay(wait);
-    if (isDirtyCmdProcess()) { return false; }
+boolean FadeInOut(byte red, byte green, byte blue, byte wait) {
+  if (isDirtyCmdProcess()) {
+    return false;
   }
-     
-  for(int k = 255; k >= 0; k=k-2) {
-    r = (k/256.0)*red;
-    g = (k/256.0)*green;
-    b = (k/256.0)*blue;
-    setAll(r,g,b);
+  float r, g, b;
+
+  for (int k = 0; k < 256; k = k + 1) {
+    r = (k / 256.0) * red;
+    g = (k / 256.0) * green;
+    b = (k / 256.0) * blue;
+    setAll(r, g, b);
     showStrip();
     delay(wait);
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
+  }
+
+  for (int k = 255; k >= 0; k = k - 2) {
+    r = (k / 256.0) * red;
+    g = (k / 256.0) * green;
+    b = (k / 256.0) * blue;
+    setAll(r, g, b);
+    showStrip();
+    delay(wait);
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 boolean RunningLights(byte red, byte green, byte blue, int WaveDelay) {
-  int Position=0;
-  if (isDirtyCmdProcess()) { return false; }
-  for(int j=0; j<NUM_PIXEL*5; j++)
+  int Position = 0;
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
+  for (int j = 0; j < NUM_PIXEL * 5; j++)
   {
-      Position++; // = 0; //Position + Rate;
-      for(int i=0; i<NUM_PIXEL; i++) {
-        // sine wave, 3 offset waves make a rainbow!
-        //float level = sin(i+Position) * 127 + 128;
-        //setPixel(i,level,0,0);
-        //float level = sin(i+Position) * 127 + 128;
-        setPixel(i,((sin(i+Position) * 127 + 128)/255)*red,
-                   ((sin(i+Position) * 127 + 128)/255)*green,
-                   ((sin(i+Position) * 127 + 128)/255)*blue);
-      }
-     
-      showStrip();
-      delay(WaveDelay);
-      if (isDirtyCmdProcess()) { return false; }
+    Position++; // = 0; //Position + Rate;
+    for (int i = 0; i < NUM_PIXEL; i++) {
+      // sine wave, 3 offset waves make a rainbow!
+      //float level = sin(i+Position) * 127 + 128;
+      //setPixel(i,level,0,0);
+      //float level = sin(i+Position) * 127 + 128;
+      setPixel(i, ((sin(i + Position) * 127 + 128) / 255)*red,
+               ((sin(i + Position) * 127 + 128) / 255)*green,
+               ((sin(i + Position) * 127 + 128) / 255)*blue);
+    }
+
+    showStrip();
+    delay(WaveDelay);
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 boolean RGBfadeInAndOut() {
-  if (!FadeInOut(255, 0, 0, 1)) { return false; } // red
+  if (!FadeInOut(255, 0, 0, 1)) {
+    return false;  // red
+  }
   delay(300);
-  if (!FadeInOut(0, 255, 0, 1)) { return false; } // white
+  if (!FadeInOut(0, 255, 0, 1)) {
+    return false;  // white
+  }
   delay(300);
-  if (!FadeInOut(0, 0, 255, 1)) { return false; } // blue
+  if (!FadeInOut(0, 0, 255, 1)) {
+    return false;  // blue
+  }
   delay(300);
-  if (!FadeInOut(255,255,255, 1)) { return false; }
+  if (!FadeInOut(255, 255, 255, 1)) {
+    return false;
+  }
   delay(300);
   return true;
 }
@@ -237,9 +294,11 @@ boolean RGBfadeInAndOut() {
 
 
 boolean lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
-  if (isDirtyCmdProcess()) { return false; }
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
   if (group >= strip.numPixels()) {
-//    Serial.println("ERROR: lightSpin() group need to be less than numPixels");
+    //    Serial.println("ERROR: lightSpin() group need to be less than numPixels");
     return false;
   }
   for (uint16_t i = 0; i < group; i++) {
@@ -252,13 +311,17 @@ boolean lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait
     strip.setPixelColor((i - group) % strip.numPixels(), strip.Color(0, 0, 0));
     strip.show();
     delay(wait);
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 boolean nightMode(uint32_t color, uint8_t wait, uint8_t top) {
-  if (isDirtyCmdProcess()) { return false; }
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
   for (int i = 0; i <= top; i++) {
     strip.setBrightness(i);
     for (uint16_t j = 0; j < strip.numPixels(); j++) {
@@ -269,12 +332,18 @@ boolean nightMode(uint32_t color, uint8_t wait, uint8_t top) {
       delay(wait);
     }
     delay(wait);
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   delay(700);
-  if (isDirtyCmdProcess()) { return false; }
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
   delay(700);
-  if (isDirtyCmdProcess()) { return false; }
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
   for (int i = top; i >= 0; i--) {
     strip.setBrightness(i);
     for (uint16_t j = 0; j < strip.numPixels(); j++) {
@@ -285,58 +354,74 @@ boolean nightMode(uint32_t color, uint8_t wait, uint8_t top) {
       delay(wait);
     }
     delay(wait);
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 boolean smoothRainbowCycle(uint8_t wait) {
-  if (isDirtyCmdProcess()) { return false ; }
+  if (isDirtyCmdProcess()) {
+    return false ;
+  }
   uint16_t i, j;
-  for(j=0; j<256; j++) {
-    for(i=0; i<strip.numPixels(); i++) {
-      strip.setPixelColor(i, Wheel((i+j) & 255));
+  for (j = 0; j < 256; j++) {
+    for (i = 0; i < strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel((i + j) & 255));
     }
     strip.show();
     delay(wait);
-    if (j%10 == 0 && isDirtyCmdProcess()) { return false; }
+    if (j % 10 == 0 && isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 // Slightly different, this makes the rainbow equally distributed throughout
 boolean rainbowCycle(uint8_t wait) {
-  if (isDirtyCmdProcess()) { return false; }
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
   uint16_t i, j;
 
-  for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
-    for(i=0; i< strip.numPixels(); i++) {
+  for (j = 0; j < 256 * 5; j++) { // 5 cycles of all colors on wheel
+    for (i = 0; i < strip.numPixels(); i++) {
       strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
     }
     strip.show();
     delay(wait);
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
 
 //Theatre-style crawling lights.
 boolean theaterChase(uint32_t c, uint8_t wait) {
-  if (isDirtyCmdProcess()) { return false; }
-  for (int j=0; j<10; j++) {  //do 10 cycles of chasing
-    for (int q=0; q < 3; q++) {
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, c);    //turn every third pixel on
+  if (isDirtyCmdProcess()) {
+    return false;
+  }
+  for (int j = 0; j < 10; j++) { //do 10 cycles of chasing
+    for (int q = 0; q < 3; q++) {
+      for (uint16_t i = 0; i < strip.numPixels(); i = i + 3) {
+        strip.setPixelColor(i + q, c);  //turn every third pixel on
       }
       strip.show();
-      if (isDirtyCmdProcess()) { return false; }
+      if (isDirtyCmdProcess()) {
+        return false;
+      }
       delay(wait);
 
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      for (uint16_t i = 0; i < strip.numPixels(); i = i + 3) {
+        strip.setPixelColor(i + q, 0);      //turn every third pixel off
       }
     }
-    if (isDirtyCmdProcess()) { return false; }
+    if (isDirtyCmdProcess()) {
+      return false;
+    }
   }
   return true;
 }
@@ -345,10 +430,10 @@ boolean theaterChase(uint32_t c, uint8_t wait) {
 // The colours are a transition r - g - b - back to r.
 uint32_t Wheel(byte WheelPos) {
   WheelPos = 255 - WheelPos;
-  if(WheelPos < 85) {
+  if (WheelPos < 85) {
     return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
   }
-  if(WheelPos < 170) {
+  if (WheelPos < 170) {
     WheelPos -= 85;
     return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
   }
@@ -364,25 +449,25 @@ String getStrPart(String data, char separator, int index)
 {
   int found = 0;
   int strIndex[] = {0, -1};
-  int maxIndex = data.length()-1;
+  int maxIndex = data.length() - 1;
 
-  for(int i=0; i<=maxIndex && found<=index; i++){
-    if(data.charAt(i)==separator || i==maxIndex){
-        found++;
-        strIndex[0] = strIndex[1]+1;
-        strIndex[1] = (i == maxIndex) ? i+1 : i;
+  for (int i = 0; i <= maxIndex && found <= index; i++) {
+    if (data.charAt(i) == separator || i == maxIndex) {
+      found++;
+      strIndex[0] = strIndex[1] + 1;
+      strIndex[1] = (i == maxIndex) ? i + 1 : i;
     }
   }
 
-  return found>index ? data.substring(strIndex[0], strIndex[1]) : "";
+  return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
 }
 
 /*************************END*UTILS***********************/
 
 String construct_config_packet(device_config deviceConfig) {
-    return "SAVE-I:"+String(deviceConfig.intensity)+
-            ";M:"+String(deviceConfig._mode)+
-            ";C:"+String(deviceConfig.red)+","+String(deviceConfig.green)+","+String(deviceConfig.blue);
+  return "SAVE-I:" + String(deviceConfig.intensity) +
+         ";M:" + String(deviceConfig._mode) +
+         ";C:" + String(deviceConfig.red) + "," + String(deviceConfig.green) + "," + String(deviceConfig.blue);
 }
 /***********************ARDUINO*COMMUNICATIONS*****************/
 String save_config_to_arduino_status;
@@ -470,13 +555,13 @@ void handleAdminUartCmd() {
     if (adminPart.equals("ADMIN")) {
       String cmd = getStrPart(incommingStr, '+', 1);
     } else {
-        handle_admin_uart_error = "Invalid command: " + incommingStr;
+      handle_admin_uart_error = "Invalid command: " + incommingStr;
     }
   }
 }
 
 /************************RESPONSE*PROCESSOR****************/
-String processor(const String& var){
+String processor(const String& var) {
   if (var == "INTENSITY") {
     return String(deviceConfig.intensity);
   } else if (var == "_MODE") {
@@ -489,7 +574,7 @@ String processor(const String& var){
     return String(deviceConfig.blue);
   } else if (var == "EEPROM_WRITE_CYCLE_COUNT") {
     return String(deviceConfig.eepromWriteCycleCount);
-  } 
+  }
 
   else if (var == "SOFTWARE_VERSION") {
     return String(SOFTWARE_VERSION);
@@ -501,8 +586,8 @@ String processor(const String& var){
     return update_device_config_from_arduino_success ? "OK" : update_device_config_from_arduino_status;
   } else if (var == "HANDLE_ADMIN_UART_ERROR") {
     return handle_admin_uart_error;
-  } 
-  
+  }
+
   else if (var == "NUM_CONNECTED_CLIENT_TO_AP") {
     return String(WiFi.softAPgetStationNum());
   }
@@ -510,16 +595,22 @@ String processor(const String& var){
 }
 /*******************END*RESPONSE*PROCESSOR******************/
 
-void setupInLowPowerModeAndDisableLED() {
+boolean wifi_off = false;
+void turnOffWifi() {
+
   WiFi.disconnect(true);
-  Serial.println(F("Enable lower power mode and disable LED"));
+  Serial.println(F("Enable lower power mode by turning off wifi"));
+  WiFi.mode(WIFI_OFF);
+  wifi_off = true;
+}
+
+void setupInLowPowerModeAndDisableLED() {
+  turnOffWifi();
   strip.setBrightness(0);
   for (uint16_t i = 0; i < strip.numPixels(); i++) {
-    strip.setPixelColor(i, strip.Color(0,0,0));
+    strip.setPixelColor(i, strip.Color(0, 0, 0));
   }
   strip.show();
-  
-  WiFi.mode(WIFI_OFF);
 }
 
 boolean firstUp = false;
@@ -529,16 +620,16 @@ void setup() {
 
   strip.begin();
   strip.setBrightness(20);
-  stableLightMode(strip.Color(255,0,0));
+  stableLightMode(strip.Color(255, 0, 0));
   delay(200);
-  stableLightMode(strip.Color(0,0,0));
+  stableLightMode(strip.Color(0, 0, 0));
   delay(200);
-  
-  
+
+
   pinMode(SOFT_SWITCH_POWER_MANAGEMENT_PIN, INPUT_PULLUP);
   Serial.println(F("Enable Access Point mode and enable LED strip"));
   Serial.print(F("Setting AP (Access Point)…"));
-  WiFi.persistent(false); 
+  WiFi.persistent(false);
   Serial.print(F("Setting soft-AP configuration ... "));
   Serial.println(WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");
   // Remove the password parameter, if you want the AP (Access Point) to be open
@@ -547,20 +638,20 @@ void setup() {
   Serial.print(F("Local IP: ")); Serial.println(WiFi.localIP());
 
   Serial.println(F("Setting up SPIFFS"));
-  if(!SPIFFS.begin()){
+  if (!SPIFFS.begin()) {
     Serial.println(F("An Error has occurred while mounting SPIFFS"));
     //error here
   }
 
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
     Serial.println("HTTP_GET /");
     request->send(SPIFFS, "/index.html", String(), false, processor);
   });
-  
-  server.on("/save", HTTP_POST, [](AsyncWebServerRequest *request){
+
+  server.on("/save", HTTP_POST, [](AsyncWebServerRequest * request) {
     Serial.println("HTTP_POST /save");
-    for(int i=0;i<request->params();i++){
+    for (int i = 0; i < request->params(); i++) {
       AsyncWebParameter* p = request->getParam(i);
       if (p->name().equals("intensity")) {
         toSavePayload.intensity = p->value().toInt();
@@ -578,7 +669,7 @@ void setup() {
     dirtySavePacket = true;
     request->send_P(200, "text/plain", "Ok. trying to save packet");
   });
-  
+
   server.begin();
   Serial.println("Done configuring server");
   firstUp = true;
@@ -587,10 +678,13 @@ void setup() {
 #define MAX_CONFIG_REFRESH_RATE 86400000 // 1 days
 #define MIN_CONFIG_REFRESH_RATE 100000
 #define CHECK_DIRTY_PAYLOAD_PERIOD 2000
+#define TURN_OFF_WIFI_CYCLE 5400000 // 1.5 hours
+
 
 unsigned long checkUpdateConfigRefreshTimer = millis();
 unsigned long checkDirtyPayloadTimer = millis();
 unsigned long checkNumAccessTimer = millis();
+unsigned long checkSinceTurnOnTimer = millis();
 unsigned long  config_refresh_rate = MAX_CONFIG_REFRESH_RATE;
 
 byte previousPowerManagerMode = LOW;
@@ -609,9 +703,9 @@ void loop() {
     // nothing
   } else if (previousPowerManagerMode == LOW && currentPowerManagerMode == HIGH && !firstUp) {
     Serial.println("Restarting");
-    stableLightMode(strip.Color(255,0,0));
+    stableLightMode(strip.Color(255, 0, 0));
     delay(200);
-    stableLightMode(strip.Color(0,0,0));
+    stableLightMode(strip.Color(0, 0, 0));
     delay(200);
     resetFunc();
     return;
@@ -623,26 +717,27 @@ void loop() {
   } else { // previousPowerManagerMode == HIGH && currentPowerManagerMode == HIGH
     // nothing
   }
+
   previousPowerManagerMode = currentPowerManagerMode;
 
   update_device_config_from_arduino_success = update_device_config_from_arduino();
   Serial.print(F("Device config: "));
   Serial.println(deviceConfigDebugString(deviceConfig));
   strip.setBrightness(deviceConfig.intensity * 2);
-  stableLightMode(strip.Color(0,0,0));
+  stableLightMode(strip.Color(0, 0, 0));
   strip.show();
   checkDirtyPayloadTimer = millis();
   while (1) {
     byte reading = digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN);
     if (reading == LOW) {
-      dirtySavePacket = false; 
+      dirtySavePacket = false;
       resetDeviceMode = false;
-      break; 
+      break;
     }
     // have timer to avoid multiple save at a single time.
     if ((millis() - checkDirtyPayloadTimer) > CHECK_DIRTY_PAYLOAD_PERIOD && dirtySavePacket) {
       save_config_to_arduino_success = saveConfigToArduino();
-      dirtySavePacket = false;  
+      dirtySavePacket = false;
       resetDeviceMode = true;
       checkDirtyPayloadTimer = millis();
     }
@@ -659,8 +754,12 @@ void loop() {
       }
       checkNumAccessTimer = millis();
     }
-    
-//    handleAdminUartCmd();
+
+    if (!wifi_off && (millis() - checkSinceTurnOnTimer) > TURN_OFF_WIFI_CYCLE) {
+      turnOffWifi();
+    }
+
+    //    handleAdminUartCmd();
 
 
     if (resetDeviceMode) {
@@ -669,52 +768,60 @@ void loop() {
       onResetStrip();
       break;
     }
-    
+
     switch (deviceConfig._mode) {
       case STABLE_LIGHT_MODE:
-        stableLightMode(getUserConfiguredStripColor()); 
-        delay(1000);  
+        stableLightMode(getUserConfiguredStripColor());
+        delay(1000);
         break;
-  
+
       case LIGHT_SPIN_LIGHT_MODE:
         lightSpin(getUserConfiguredStripColor(), 5, 10000, 40);
         break;
-  
+
       case NIGHT_MODE_LIGHT_MODE:
         nightMode(getUserConfiguredStripColor(), 80, deviceConfig.intensity);
         break;
-  
+
       case RUNING_LIGHT_MODE:
         RunningLights(deviceConfig.red, deviceConfig.green, deviceConfig.blue, 80);
         break;
-  
+
       case RGB_WIPE_LIGHT_MODE:
-        if (!colorWipe(strip.Color(255, 0, 0), 50)) { break; }; // Red
-        if (!colorWipe(strip.Color(0, 255, 0), 50)) { break; }; // Green
-        if (!colorWipe(strip.Color(0, 0, 255), 50)) { break; }; // Blue
-        if (!colorWipe(strip.Color(0, 0, 0, 255), 50)) { break; }; // White RGBW
+        if (!colorWipe(strip.Color(255, 0, 0), 50)) {
+          break;
+        }; // Red
+        if (!colorWipe(strip.Color(0, 255, 0), 50)) {
+          break;
+        }; // Green
+        if (!colorWipe(strip.Color(0, 0, 255), 50)) {
+          break;
+        }; // Blue
+        if (!colorWipe(strip.Color(0, 0, 0, 255), 50)) {
+          break;
+        }; // White RGBW
         break;
 
-      case RGB_FADE_IN_AND_OUT: 
+      case RGB_FADE_IN_AND_OUT:
         RGBfadeInAndOut();
         break;
-  
+
       case RAINBOW_CYCLE_LIGHT_MODE:
         rainbowCycle(20);
         break;
-  
+
       case SMOOTH_RAINBOW_TRANSITION_LIGHT_MODE:
         smoothRainbowCycle(40);
         break;
-  
+
       case THEATHER_CHASE_RAINBOW_LIGHT_MODE:
         theaterChaseRainbow(50);
         break;
-  
+
       case LIGHT_SHOW_LIGHT_MODE01:
         lightshow01();
         break;
-  
+
       default:
         break;
     }
@@ -725,7 +832,7 @@ void loop() {
 
 void onResetStrip() {
   resetDeviceMode = false;
-  
+
   // reread mode info here
   Serial.println("onResetStrip....");
 }
