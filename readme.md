@@ -1,6 +1,3 @@
-test
-
-
 
 # Developer Notes
 ## Arduino Nano
