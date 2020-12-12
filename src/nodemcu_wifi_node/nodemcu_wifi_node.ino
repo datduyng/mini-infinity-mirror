@@ -10,6 +10,7 @@
  * 1.1.1 Auto scaling config refresh rate when there are no connected devices and there are.
  * 1.2.0 Add LED light strip manament in this board
  * 1.3.0 Add toggle switches to turn on/off wifi and LED strip power
+ * 1.3.1 Add more light mode
  */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -19,7 +20,7 @@
 #include <EEPROM.h> //https://arduino-esp8266.readthedocs.io/en/latest/libraries.html#eeprom
 #include <Adafruit_NeoPixel.h>
 
-const char* SOFTWARE_VERSION = "1.3.0";
+const char* SOFTWARE_VERSION = "1.3.1";
 
 #define SOFT_SWITCH_POWER_MANAGEMENT_PIN 12 // ~D6
 #define OWNERSHIP_WRITE_CHECK 123
@@ -28,14 +29,14 @@ const char* SOFTWARE_VERSION = "1.3.0";
 #define STABLE_LIGHT_MODE 0
 #define LIGHT_SPIN_LIGHT_MODE 1
 #define NIGHT_MODE_LIGHT_MODE 2
-#define GLOW_AND_BLOW_LIGHT_MODE 3
+#define RUNING_LIGHT_MODE 3
 
 #define RGB_WIPE_LIGHT_MODE 100
+#define RGB_FADE_IN_AND_OUT 106
 #define RAINBOW_CYCLE_LIGHT_MODE 101
 #define SMOOTH_RAINBOW_TRANSITION_LIGHT_MODE 102
 #define THEATHER_CHASE_RAINBOW_LIGHT_MODE 103
 #define LIGHT_SHOW_LIGHT_MODE01 104
-#define LIGHT_SHOW_LIGHT_MODE02 105
 
 void(* resetFunc) (void) = 0;
 
@@ -73,8 +74,14 @@ device_config defaultDeviceConfig = {
 
 volatile boolean dirtySavePacket = false;
 volatile boolean resetDeviceMode = false;
+
+unsigned long lastSoftPowerReadTimer = millis();
 boolean isDirtyCmdProcess() {
-  return dirtySavePacket || resetDeviceMode;// || digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN) == HIGH;
+  if (millis() - lastSoftPowerReadTimer > 500) {
+    lastSoftPowerReadTimer = millis();
+    if (digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN) == LOW) { return true; }
+  }
+  return dirtySavePacket || resetDeviceMode;
 }
 String arduinoErrorRequestError = "No error";
 
@@ -89,7 +96,8 @@ String arduinoErrorRequestError = "No error";
 //   NEO_RGBW    Pixels are wired for RGBW bitstream (NeoPixel RGBW products)
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXEL, NEO_PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-boolean stableLightMode(uint32_t color) {
+void stableLightMode(uint32_t color) {
+  if (isDirtyCmdProcess()) { return; }
   for (uint16_t i = 0; i < strip.numPixels(); i++) {
     strip.setPixelColor(i, color);
   }
@@ -101,57 +109,138 @@ uint32_t getUserConfiguredStripColor() {
 }
 
 //TODO: fix this function
-void lightshow01() {
+boolean lightshow01() {
   strip.setBrightness(80);
-  colorWipe(strip.Color(255, 0, 0), 50); // Red
-  colorWipe(strip.Color(0, 255, 0), 50); // Green
-  colorWipe(strip.Color(0, 0, 255), 50); // Blue
-  colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
+  if (!colorWipe(strip.Color(255, 0, 0), 50)) { return false; }; // Red
+  if (!colorWipe(strip.Color(0, 255, 0), 50)) { return false; }; // Green
+  if (!colorWipe(strip.Color(0, 0, 255), 50)) { return false; }; // Blue
+  if (!colorWipe(strip.Color(0, 0, 0, 255), 50)) { return false; }; // White RGBW
   // Send a theater pixel chase in...
-  theaterChase(strip.Color(127, 127, 127), 50); // White
-  theaterChase(strip.Color(127, 0, 0), 50); // Red
-  theaterChase(strip.Color(0, 0, 127), 50); // Blue
-  rainbowCycle(10);
-  smoothRainbowCycle(10);
-  theaterChaseRainbow(30);
-  lightSpin(strip.Color(0, 255, 0), 5, 00, 40);
-  nightMode(strip.Color(0, 255, 0), 20, 50);
+  if (!theaterChase(strip.Color(127, 127, 127), 50)) { return false; }; // White
+  if (!theaterChase(strip.Color(127, 0, 0), 50)) { return false; }; // Red
+  if (!theaterChase(strip.Color(0, 0, 127), 50)) { return false; }; // Blue
+  if (!rainbowCycle(10)) { return false; };
+  if (!smoothRainbowCycle(10)) { return false; };
+  if (!theaterChaseRainbow(30)) { return false; };
+  if (!lightSpin(strip.Color(0, 255, 0), 5, 00, 40)) { return false; };
+  if (!nightMode(strip.Color(0, 255, 0), 20, 50)) { return false; };
+  return true;
 }
 
-void theaterChaseRainbow(uint8_t wait) {
-  if (isDirtyCmdProcess()) { return; }
+boolean theaterChaseRainbow(uint8_t wait) {
+  if (isDirtyCmdProcess()) { return false; }
   for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
     for (int q=0; q < 3; q++) {
       for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
         strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
       }
       strip.show();
-      if (isDirtyCmdProcess()) { return; }
+      if (isDirtyCmdProcess()) { return false; }
       delay(wait);
 
       for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
         strip.setPixelColor(i+q, 0);        //turn every third pixel off
       }
-      if (isDirtyCmdProcess()) { return; }
+      
     }
+    if (isDirtyCmdProcess()) { return false; }
   }
+  return true;
 }
 
-void colorWipe(uint32_t c, uint8_t wait) {
-  if (isDirtyCmdProcess()) { return; }
+boolean colorWipe(uint32_t c, uint8_t wait) {
+  if (isDirtyCmdProcess()) { return false; }
   for(uint16_t i=0; i<strip.numPixels(); i++) {
     strip.setPixelColor(i, c);
     strip.show();
     delay(wait);
-    if (isDirtyCmdProcess()) { return; }
+    if (isDirtyCmdProcess()) { return false; }
   }
+  return true;
 }
 
-void lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
-  if (isDirtyCmdProcess()) { return; }
+void showStrip() {
+ strip.show();
+}
+void setPixel(int Pixel, byte red, byte green, byte blue) {
+ strip.setPixelColor(Pixel, strip.Color(red, green, blue));
+}
+
+void setAll(byte red, byte green, byte blue) {
+  for(int i = 0; i < NUM_PIXEL; i++ ) {
+    setPixel(i, red, green, blue);
+  }
+  showStrip();
+}
+
+boolean FadeInOut(byte red, byte green, byte blue, byte wait){
+  if (isDirtyCmdProcess()) { return false; }
+  float r, g, b;
+     
+  for(int k = 0; k < 256; k=k+1) {
+    r = (k/256.0)*red;
+    g = (k/256.0)*green;
+    b = (k/256.0)*blue;
+    setAll(r,g,b);
+    showStrip();
+    delay(wait);
+    if (isDirtyCmdProcess()) { return false; }
+  }
+     
+  for(int k = 255; k >= 0; k=k-2) {
+    r = (k/256.0)*red;
+    g = (k/256.0)*green;
+    b = (k/256.0)*blue;
+    setAll(r,g,b);
+    showStrip();
+    delay(wait);
+    if (isDirtyCmdProcess()) { return false; }
+  }
+  return true;
+}
+
+boolean RunningLights(byte red, byte green, byte blue, int WaveDelay) {
+  int Position=0;
+  if (isDirtyCmdProcess()) { return false; }
+  for(int j=0; j<NUM_PIXEL*5; j++)
+  {
+      Position++; // = 0; //Position + Rate;
+      for(int i=0; i<NUM_PIXEL; i++) {
+        // sine wave, 3 offset waves make a rainbow!
+        //float level = sin(i+Position) * 127 + 128;
+        //setPixel(i,level,0,0);
+        //float level = sin(i+Position) * 127 + 128;
+        setPixel(i,((sin(i+Position) * 127 + 128)/255)*red,
+                   ((sin(i+Position) * 127 + 128)/255)*green,
+                   ((sin(i+Position) * 127 + 128)/255)*blue);
+      }
+     
+      showStrip();
+      delay(WaveDelay);
+      if (isDirtyCmdProcess()) { return false; }
+  }
+  return true;
+}
+
+boolean RGBfadeInAndOut() {
+  if (!FadeInOut(255, 0, 0, 1)) { return false; } // red
+  delay(300);
+  if (!FadeInOut(0, 255, 0, 1)) { return false; } // white
+  delay(300);
+  if (!FadeInOut(0, 0, 255, 1)) { return false; } // blue
+  delay(300);
+  if (!FadeInOut(255,255,255, 1)) { return false; }
+  delay(300);
+  return true;
+}
+
+
+
+boolean lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
+  if (isDirtyCmdProcess()) { return false; }
   if (group >= strip.numPixels()) {
 //    Serial.println("ERROR: lightSpin() group need to be less than numPixels");
-    return;
+    return false;
   }
   for (uint16_t i = 0; i < group; i++) {
     strip.setPixelColor(i, color);
@@ -163,12 +252,13 @@ void lightSpin(uint32_t color, uint8_t group, uint16_t numSteps, uint8_t wait) {
     strip.setPixelColor((i - group) % strip.numPixels(), strip.Color(0, 0, 0));
     strip.show();
     delay(wait);
-    if (isDirtyCmdProcess()) { return; }
+    if (isDirtyCmdProcess()) { return false; }
   }
+  return true;
 }
 
-void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
-  if (isDirtyCmdProcess()) { return; }
+boolean nightMode(uint32_t color, uint8_t wait, uint8_t top) {
+  if (isDirtyCmdProcess()) { return false; }
   for (int i = 0; i <= top; i++) {
     strip.setBrightness(i);
     for (uint16_t j = 0; j < strip.numPixels(); j++) {
@@ -179,12 +269,12 @@ void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
       delay(wait);
     }
     delay(wait);
-    if (isDirtyCmdProcess()) { return; }
+    if (isDirtyCmdProcess()) { return false; }
   }
   delay(700);
-  if (isDirtyCmdProcess()) { return; }
+  if (isDirtyCmdProcess()) { return false; }
   delay(700);
-  if (isDirtyCmdProcess()) { return; }
+  if (isDirtyCmdProcess()) { return false; }
   for (int i = top; i >= 0; i--) {
     strip.setBrightness(i);
     for (uint16_t j = 0; j < strip.numPixels(); j++) {
@@ -195,12 +285,13 @@ void nightMode(uint32_t color, uint8_t wait, uint8_t top) {
       delay(wait);
     }
     delay(wait);
-    if (isDirtyCmdProcess()) { return; }
+    if (isDirtyCmdProcess()) { return false; }
   }
+  return true;
 }
 
-void smoothRainbowCycle(uint8_t wait) {
-  if (isDirtyCmdProcess()) { return; }
+boolean smoothRainbowCycle(uint8_t wait) {
+  if (isDirtyCmdProcess()) { return false ; }
   uint16_t i, j;
   for(j=0; j<256; j++) {
     for(i=0; i<strip.numPixels(); i++) {
@@ -208,13 +299,14 @@ void smoothRainbowCycle(uint8_t wait) {
     }
     strip.show();
     delay(wait);
-    if (isDirtyCmdProcess()) { return; }
+    if (j%10 == 0 && isDirtyCmdProcess()) { return false; }
   }
+  return true;
 }
 
 // Slightly different, this makes the rainbow equally distributed throughout
-void rainbowCycle(uint8_t wait) {
-  if (isDirtyCmdProcess()) { return; }
+boolean rainbowCycle(uint8_t wait) {
+  if (isDirtyCmdProcess()) { return false; }
   uint16_t i, j;
 
   for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
@@ -223,28 +315,30 @@ void rainbowCycle(uint8_t wait) {
     }
     strip.show();
     delay(wait);
-    if (isDirtyCmdProcess()) { return; }
+    if (isDirtyCmdProcess()) { return false; }
   }
+  return true;
 }
 
 //Theatre-style crawling lights.
-void theaterChase(uint32_t c, uint8_t wait) {
-  if (isDirtyCmdProcess()) { return; }
+boolean theaterChase(uint32_t c, uint8_t wait) {
+  if (isDirtyCmdProcess()) { return false; }
   for (int j=0; j<10; j++) {  //do 10 cycles of chasing
     for (int q=0; q < 3; q++) {
       for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
         strip.setPixelColor(i+q, c);    //turn every third pixel on
       }
       strip.show();
-      if (isDirtyCmdProcess()) { return; }
+      if (isDirtyCmdProcess()) { return false; }
       delay(wait);
 
       for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
         strip.setPixelColor(i+q, 0);        //turn every third pixel off
       }
     }
-    if (isDirtyCmdProcess()) { return; }
+    if (isDirtyCmdProcess()) { return false; }
   }
+  return true;
 }
 
 // Input a value 0 to 255 to get a color value.
@@ -419,13 +513,28 @@ String processor(const String& var){
 void setupInLowPowerModeAndDisableLED() {
   WiFi.disconnect(true);
   Serial.println(F("Enable lower power mode and disable LED"));
-  stableLightMode(strip.Color(0,0,0));
+  strip.setBrightness(0);
+  for (uint16_t i = 0; i < strip.numPixels(); i++) {
+    strip.setPixelColor(i, strip.Color(0,0,0));
+  }
+  strip.show();
+  
   WiFi.mode(WIFI_OFF);
 }
 
+boolean firstUp = false;
 void setup() {
   Serial.begin(9600);
   EEPROM.begin(50);
+
+  strip.begin();
+  strip.setBrightness(20);
+  stableLightMode(strip.Color(255,0,0));
+  delay(200);
+  stableLightMode(strip.Color(0,0,0));
+  delay(200);
+  
+  
   pinMode(SOFT_SWITCH_POWER_MANAGEMENT_PIN, INPUT_PULLUP);
   Serial.println(F("Enable Access Point mode and enable LED strip"));
   Serial.print(F("Setting AP (Access Point)…"));
@@ -439,7 +548,7 @@ void setup() {
 
   Serial.println(F("Setting up SPIFFS"));
   if(!SPIFFS.begin()){
-    Serial.println("An Error has occurred while mounting SPIFFS");
+    Serial.println(F("An Error has occurred while mounting SPIFFS"));
     //error here
   }
 
@@ -471,10 +580,8 @@ void setup() {
   });
   
   server.begin();
-
-  Serial.println(F("Enabling LED strip"));
-  strip.begin();
-  strip.show();
+  Serial.println("Done configuring server");
+  firstUp = true;
 }
 
 #define MAX_CONFIG_REFRESH_RATE 86400000 // 1 days
@@ -489,15 +596,30 @@ unsigned long  config_refresh_rate = MAX_CONFIG_REFRESH_RATE;
 byte previousPowerManagerMode = LOW;
 void loop() {
   byte currentPowerManagerMode = digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN);
-  if (previousPowerManagerMode == LOW && currentPowerManagerMode == LOW) {
+  if (previousPowerManagerMode == LOW && currentPowerManagerMode == LOW && firstUp ) {
+    setupInLowPowerModeAndDisableLED();
+    firstUp = false;
     previousPowerManagerMode = currentPowerManagerMode;
     return;
+  } else if (previousPowerManagerMode == LOW && currentPowerManagerMode == LOW) {
+    previousPowerManagerMode = currentPowerManagerMode;
+    firstUp = false;
+    delay(600);
+    return;
     // nothing
-  } else if (previousPowerManagerMode == LOW && currentPowerManagerMode == HIGH) {
+  } else if (previousPowerManagerMode == LOW && currentPowerManagerMode == HIGH && !firstUp) {
+    Serial.println("Restarting");
+    stableLightMode(strip.Color(255,0,0));
+    delay(200);
+    stableLightMode(strip.Color(0,0,0));
+    delay(200);
     resetFunc();
     return;
   } else if (previousPowerManagerMode == HIGH && currentPowerManagerMode == LOW) {
     setupInLowPowerModeAndDisableLED();
+    firstUp = false;
+    previousPowerManagerMode = currentPowerManagerMode;
+    return;
   } else { // previousPowerManagerMode == HIGH && currentPowerManagerMode == HIGH
     // nothing
   }
@@ -511,7 +633,8 @@ void loop() {
   strip.show();
   checkDirtyPayloadTimer = millis();
   while (1) {
-    if (digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN) == LOW) {
+    byte reading = digitalRead(SOFT_SWITCH_POWER_MANAGEMENT_PIN);
+    if (reading == LOW) {
       dirtySavePacket = false; 
       resetDeviceMode = false;
       break; 
@@ -537,19 +660,20 @@ void loop() {
       checkNumAccessTimer = millis();
     }
     
-    handleAdminUartCmd();
+//    handleAdminUartCmd();
 
 
     if (resetDeviceMode) {
-      Serial.println("Restarting");
+      Serial.println(F("Restarting"));
       resetDeviceMode = false;
       onResetStrip();
       break;
     }
-
+    
     switch (deviceConfig._mode) {
       case STABLE_LIGHT_MODE:
-        stableLightMode(getUserConfiguredStripColor());   
+        stableLightMode(getUserConfiguredStripColor()); 
+        delay(1000);  
         break;
   
       case LIGHT_SPIN_LIGHT_MODE:
@@ -560,14 +684,19 @@ void loop() {
         nightMode(getUserConfiguredStripColor(), 80, deviceConfig.intensity);
         break;
   
-      case GLOW_AND_BLOW_LIGHT_MODE:
+      case RUNING_LIGHT_MODE:
+        RunningLights(deviceConfig.red, deviceConfig.green, deviceConfig.blue, 80);
         break;
   
       case RGB_WIPE_LIGHT_MODE:
-        colorWipe(strip.Color(255, 0, 0), 50); // Red
-        colorWipe(strip.Color(0, 255, 0), 50); // Green
-        colorWipe(strip.Color(0, 0, 255), 50); // Blue
-        colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
+        if (!colorWipe(strip.Color(255, 0, 0), 50)) { break; }; // Red
+        if (!colorWipe(strip.Color(0, 255, 0), 50)) { break; }; // Green
+        if (!colorWipe(strip.Color(0, 0, 255), 50)) { break; }; // Blue
+        if (!colorWipe(strip.Color(0, 0, 0, 255), 50)) { break; }; // White RGBW
+        break;
+
+      case RGB_FADE_IN_AND_OUT: 
+        RGBfadeInAndOut();
         break;
   
       case RAINBOW_CYCLE_LIGHT_MODE:
@@ -584,9 +713,6 @@ void loop() {
   
       case LIGHT_SHOW_LIGHT_MODE01:
         lightshow01();
-        break;
-  
-      case LIGHT_SHOW_LIGHT_MODE02:
         break;
   
       default:
